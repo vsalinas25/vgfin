@@ -1,0 +1,2519 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#000000" />
+<title>Vitto &amp; Giulio — Gestão Financeira</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=JetBrains+Mono:wght@400;500;600&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+:root {
+  --black: #000000;
+  --green: #19903a;
+  --offwhite: #efe9e0;
+  --success: #19903a;
+  --danger: #c0392b;
+  --warning: #d4a017;
+  --muted: #6b6560;
+  --border: #d4cfc8;
+  --font-display: 'Playfair Display', serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --font-ui: 'DM Sans', sans-serif;
+  --radius: 3px;
+  --sidebar-w: 240px;
+  --sidebar-collapsed: 56px;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; font-family: var(--font-ui); background: var(--offwhite); color: var(--black); }
+#root { height: 100%; }
+
+/* ── SCROLLBARS ─────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ── AUTH SCREEN ──────────────────────────────────────── */
+.auth-screen {
+  min-height: 100vh; background: var(--black);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+.auth-card {
+  width: 100%; max-width: 400px;
+  border: 1px solid #222;
+  padding: 48px 40px;
+  background: #080808;
+}
+.auth-logo {
+  font-family: var(--font-display);
+  color: #fff; font-size: 24px; font-weight: 900;
+  letter-spacing: 0.02em; line-height: 1.1;
+  margin-bottom: 2px;
+}
+.auth-logo-sub {
+  font-family: var(--font-ui); font-size: 11px;
+  color: var(--muted); letter-spacing: 0.12em;
+  text-transform: uppercase; margin-bottom: 0;
+}
+.auth-rule {
+  height: 1px; background: var(--green);
+  margin: 16px 0 36px;
+}
+.auth-title {
+  font-family: var(--font-display);
+  color: #fff; font-size: 18px; font-weight: 700;
+  margin-bottom: 28px;
+}
+.auth-field { margin-bottom: 18px; }
+.auth-field label {
+  display: block; font-size: 11px; font-weight: 500;
+  color: var(--muted); letter-spacing: 0.1em;
+  text-transform: uppercase; margin-bottom: 7px;
+}
+.auth-field input {
+  width: 100%; background: #111; border: 1px solid #333;
+  color: #fff; font-family: var(--font-mono);
+  font-size: 14px; padding: 11px 14px;
+  border-radius: var(--radius); outline: none;
+  transition: border 0.15s;
+}
+.auth-field input:focus { border-color: var(--green); }
+.auth-btn {
+  width: 100%; background: var(--green);
+  color: #fff; font-family: var(--font-ui);
+  font-size: 13px; font-weight: 600;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  border: none; padding: 13px; cursor: pointer;
+  border-radius: var(--radius);
+  transition: opacity 0.15s;
+  margin-top: 6px;
+}
+.auth-btn:hover { opacity: 0.88; }
+.auth-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.auth-link {
+  display: block; text-align: center;
+  margin-top: 18px; font-size: 12px;
+  color: var(--muted); cursor: pointer;
+  transition: color 0.15s;
+}
+.auth-link:hover { color: var(--green); }
+.auth-error {
+  background: #1a0a0a; border: 1px solid var(--danger);
+  color: #f08080; font-size: 12px;
+  padding: 10px 14px; border-radius: var(--radius);
+  margin-bottom: 16px;
+}
+
+/* ── APP LAYOUT ──────────────────────────────────────── */
+.app { display: flex; height: 100vh; overflow: hidden; }
+
+/* ── SIDEBAR ──────────────────────────────────────────── */
+.sidebar {
+  width: var(--sidebar-w);
+  background: var(--black);
+  display: flex; flex-direction: column;
+  flex-shrink: 0;
+  overflow-y: auto; overflow-x: hidden;
+  transition: width 0.2s ease;
+}
+.sidebar.collapsed { width: var(--sidebar-collapsed); }
+.sidebar-brand {
+  padding: 24px 20px 0;
+  border-bottom: 1px solid #1a1a1a;
+  padding-bottom: 18px;
+  flex-shrink: 0;
+}
+.sidebar-brand-name {
+  font-family: var(--font-display);
+  color: #fff; font-size: 15px; font-weight: 900;
+  letter-spacing: 0.03em; line-height: 1.15;
+  white-space: nowrap;
+}
+.sidebar-brand-rule {
+  height: 1px; background: var(--green);
+  margin: 8px 0 6px;
+}
+.sidebar-brand-sub {
+  font-family: var(--font-ui); font-size: 9px;
+  color: var(--muted); letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.sidebar-nav { flex: 1; padding: 16px 0; }
+.nav-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 20px; cursor: pointer;
+  font-family: var(--font-ui); font-size: 13px;
+  font-weight: 500; color: #888;
+  border-left: 3px solid transparent;
+  transition: all 0.12s; position: relative;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.nav-item:hover { color: #fff; background: #0d0d0d; }
+.nav-item.active { color: var(--green); border-left-color: var(--green); background: #0a1a0d; }
+.nav-icon { font-size: 16px; flex-shrink: 0; width: 20px; text-align: center; }
+.nav-badge {
+  margin-left: auto; background: var(--danger);
+  color: #fff; font-size: 10px; font-weight: 600;
+  font-family: var(--font-mono);
+  padding: 1px 6px; border-radius: 2px;
+  min-width: 20px; text-align: center;
+}
+.sidebar-divider { height: 1px; background: #1a1a1a; margin: 8px 0; }
+.sidebar-user {
+  padding: 16px 20px; border-top: 1px solid #1a1a1a;
+  display: flex; align-items: center; gap: 10px;
+  flex-shrink: 0;
+}
+.user-avatar {
+  width: 32px; height: 32px;
+  background: var(--green); border-radius: var(--radius);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-display); font-size: 13px;
+  font-weight: 700; color: #fff; flex-shrink: 0;
+}
+.user-info { overflow: hidden; }
+.user-name {
+  font-size: 12px; font-weight: 600;
+  color: #ddd; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.user-role { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+.sidebar-logout {
+  margin-left: auto; font-size: 18px;
+  color: #444; cursor: pointer; transition: color 0.15s;
+  flex-shrink: 0;
+}
+.sidebar-logout:hover { color: var(--danger); }
+
+/* ── CONTENT AREA ────────────────────────────────────── */
+.content { flex: 1; overflow-y: auto; background: var(--offwhite); }
+.page { padding: 32px 36px; max-width: 1200px; }
+.page-header { margin-bottom: 32px; }
+.page-title {
+  font-family: var(--font-display);
+  font-size: 28px; font-weight: 900;
+  color: var(--black); line-height: 1.1;
+}
+.page-subtitle {
+  font-size: 13px; color: var(--muted);
+  margin-top: 4px; font-weight: 400;
+}
+
+/* ── OFFLINE BANNER ──────────────────────────────────── */
+.offline-banner {
+  background: var(--warning); color: #000;
+  font-family: var(--font-ui); font-size: 12px;
+  font-weight: 600; padding: 10px 36px;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid #b8880f;
+}
+
+/* ── TOAST ───────────────────────────────────────────── */
+.toast-container {
+  position: fixed; top: 20px; right: 20px;
+  z-index: 9999; display: flex; flex-direction: column; gap: 8px;
+}
+.toast {
+  font-family: var(--font-ui); font-size: 13px;
+  font-weight: 500; padding: 12px 18px;
+  border-radius: var(--radius);
+  min-width: 240px; max-width: 340px;
+  border-left: 3px solid;
+  animation: slideIn 0.2s ease;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+}
+.toast.success { background: #f0fff4; border-color: var(--success); color: #0d4a1f; }
+.toast.error { background: #fff0f0; border-color: var(--danger); color: #6b1111; }
+.toast.info { background: #fff; border-color: var(--black); color: var(--black); }
+@keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+/* ── METRIC CARDS ────────────────────────────────────── */
+.metrics-grid {
+  display: grid; gap: 16px;
+  grid-template-columns: repeat(4, 1fr);
+  margin-bottom: 24px;
+}
+.metrics-grid-2 { grid-template-columns: repeat(3, 1fr); }
+.metric-card {
+  background: #fff; border: 1px solid var(--border);
+  padding: 20px 22px; border-radius: var(--radius);
+}
+.metric-label {
+  font-size: 10px; font-weight: 600;
+  color: var(--muted); letter-spacing: 0.12em;
+  text-transform: uppercase; margin-bottom: 8px;
+}
+.metric-value {
+  font-family: var(--font-mono);
+  font-size: 22px; font-weight: 600;
+  color: var(--black); line-height: 1;
+}
+.metric-value.positive { color: var(--success); }
+.metric-value.negative { color: var(--danger); }
+.metric-value.green { color: var(--success); }
+.metric-sub { font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+/* ── TABLE ───────────────────────────────────────────── */
+.table-wrap { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.table-wrap table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table-wrap th {
+  background: #f5f2ed; font-family: var(--font-ui);
+  font-size: 10px; font-weight: 600;
+  color: var(--muted); letter-spacing: 0.1em;
+  text-transform: uppercase; padding: 11px 14px;
+  text-align: left; border-bottom: 1px solid var(--border);
+}
+.table-wrap td {
+  padding: 11px 14px; border-bottom: 1px solid #f0ece6;
+  font-family: var(--font-ui); font-size: 13px;
+  vertical-align: middle;
+}
+.table-wrap tr:last-child td { border-bottom: none; }
+.table-wrap tr:hover td { background: #faf8f4; }
+.table-wrap tr.overdue { border-left: 3px solid var(--danger); background: #fff8f8; }
+.table-wrap tr.today { border-left: 3px solid var(--warning); }
+.table-wrap tr.paid td { color: var(--muted); }
+.table-wrap tr.paid .amount-cell { text-decoration: line-through; }
+.mono { font-family: var(--font-mono); }
+
+/* ── BADGES ──────────────────────────────────────────── */
+.badge {
+  display: inline-block; padding: 2px 8px;
+  font-size: 10px; font-weight: 600;
+  font-family: var(--font-ui); letter-spacing: 0.06em;
+  text-transform: uppercase; border-radius: 2px;
+}
+.badge-pending { background: #fff3e0; color: #b45309; }
+.badge-paid { background: #e8f5e9; color: #1b5e20; }
+.badge-overdue { background: #fdecea; color: var(--danger); }
+
+/* ── BUTTONS ─────────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-ui); font-size: 12px;
+  font-weight: 600; letter-spacing: 0.05em;
+  text-transform: uppercase; padding: 8px 16px;
+  border-radius: var(--radius); cursor: pointer;
+  border: 1px solid transparent; transition: all 0.12s;
+  white-space: nowrap;
+}
+.btn-primary { background: var(--green); color: #fff; border-color: var(--green); }
+.btn-primary:hover { opacity: 0.88; }
+.btn-secondary { background: transparent; color: var(--black); border-color: var(--border); }
+.btn-secondary:hover { border-color: var(--black); }
+.btn-danger { background: transparent; color: var(--danger); border-color: var(--danger); }
+.btn-danger:hover { background: var(--danger); color: #fff; }
+.btn-sm { padding: 5px 10px; font-size: 10px; }
+.btn-ghost { background: transparent; border-color: transparent; color: var(--muted); }
+.btn-ghost:hover { color: var(--black); background: #f0ece6; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── FAB ─────────────────────────────────────────────── */
+.fab {
+  position: fixed; bottom: 28px; right: 28px;
+  width: 52px; height: 52px;
+  background: var(--green); color: #fff;
+  font-size: 24px; border: none; cursor: pointer;
+  border-radius: var(--radius);
+  box-shadow: 0 4px 20px rgba(25,144,58,0.4);
+  display: flex; align-items: center; justify-content: center;
+  transition: transform 0.15s, box-shadow 0.15s;
+  z-index: 100;
+}
+.fab:hover { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(25,144,58,0.5); }
+
+/* ── MODAL ───────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(2px);
+  display: flex; align-items: flex-end; justify-content: center;
+  z-index: 1000;
+  padding-bottom: 0;
+}
+.modal-box {
+  background: #fff; width: 100%; max-width: 560px;
+  border-radius: 3px 3px 0 0;
+  padding: 0; max-height: 92vh; overflow-y: auto;
+  animation: slideUp 0.22s ease;
+}
+@keyframes slideUp { from { transform: translateY(40px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.modal-header {
+  padding: 22px 28px 18px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  position: sticky; top: 0; background: #fff; z-index: 1;
+}
+.modal-title {
+  font-family: var(--font-display);
+  font-size: 18px; font-weight: 700;
+}
+.modal-close {
+  font-size: 20px; cursor: pointer;
+  color: var(--muted); transition: color 0.12s;
+  background: none; border: none; padding: 4px;
+}
+.modal-close:hover { color: var(--black); }
+.modal-body { padding: 24px 28px; }
+.modal-footer {
+  padding: 16px 28px; border-top: 1px solid var(--border);
+  display: flex; gap: 10px; justify-content: flex-end;
+  background: #faf8f4;
+}
+
+/* ── FORM ────────────────────────────────────────────── */
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.form-group { margin-bottom: 0; }
+.form-group.full { grid-column: 1 / -1; }
+.form-label {
+  display: block; font-size: 10px; font-weight: 600;
+  color: var(--muted); letter-spacing: 0.1em;
+  text-transform: uppercase; margin-bottom: 6px;
+}
+.form-control {
+  width: 100%; border: 1px solid var(--border);
+  background: #fff; color: var(--black);
+  font-family: var(--font-ui); font-size: 13px;
+  padding: 9px 12px; border-radius: var(--radius);
+  outline: none; transition: border 0.12s;
+  appearance: none;
+}
+.form-control:focus { border-color: var(--green); }
+.form-control.mono { font-family: var(--font-mono); }
+select.form-control { cursor: pointer; }
+.toggle-row {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 13px; cursor: pointer; margin-top: 4px;
+}
+.toggle-switch {
+  width: 36px; height: 20px; background: var(--border);
+  border-radius: 10px; position: relative;
+  transition: background 0.15s; flex-shrink: 0; cursor: pointer;
+  border: none;
+}
+.toggle-switch.on { background: var(--green); }
+.toggle-switch::after {
+  content: ''; position: absolute;
+  width: 14px; height: 14px; background: #fff;
+  border-radius: 50%; top: 3px; left: 3px;
+  transition: transform 0.15s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+.toggle-switch.on::after { transform: translateX(16px); }
+
+/* ── FILTERS BAR ─────────────────────────────────────── */
+.filters-bar {
+  display: flex; gap: 10px; align-items: center;
+  margin-bottom: 16px; flex-wrap: wrap;
+}
+.filters-bar .form-control { width: auto; min-width: 140px; }
+
+/* ── WEEKLY SUMMARY ──────────────────────────────────── */
+.weekly-summary {
+  background: var(--black); color: #fff;
+  border-radius: var(--radius); padding: 18px 22px;
+  margin-bottom: 16px; display: flex; gap: 32px;
+  align-items: center; flex-wrap: wrap;
+}
+.weekly-stat-label { font-size: 10px; color: #888; letter-spacing: 0.1em; text-transform: uppercase; }
+.weekly-stat-value { font-family: var(--font-mono); font-size: 18px; font-weight: 600; color: #fff; margin-top: 2px; }
+.weekly-stat-value.pos { color: var(--green); }
+.weekly-stat-value.neg { color: #f08080; }
+
+/* ── CARD GRID ───────────────────────────────────────── */
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.supplier-card {
+  background: #fff; border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 20px;
+  cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s;
+}
+.supplier-card:hover { border-color: var(--green); box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+.supplier-card-name {
+  font-family: var(--font-display);
+  font-size: 16px; font-weight: 700; margin-bottom: 4px;
+}
+.supplier-card-cat {
+  font-size: 10px; color: var(--muted);
+  letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 14px;
+}
+.supplier-card-stats { display: flex; gap: 16px; }
+.supplier-stat { font-size: 11px; color: var(--muted); }
+.supplier-stat strong { display: block; font-family: var(--font-mono); font-size: 14px; color: var(--black); font-weight: 600; }
+
+/* ── CASH FLOW TABLE ─────────────────────────────────── */
+.cf-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.cf-table th {
+  background: var(--black); color: #fff;
+  font-family: var(--font-ui); font-size: 10px;
+  font-weight: 600; letter-spacing: 0.1em;
+  text-transform: uppercase; padding: 12px 16px;
+  text-align: right;
+}
+.cf-table th:first-child { text-align: left; }
+.cf-table td {
+  padding: 11px 16px; border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono); font-size: 13px;
+  text-align: right;
+}
+.cf-table td:first-child { font-family: var(--font-ui); font-size: 13px; font-weight: 500; text-align: left; }
+.cf-table tr.positive td.result { color: var(--success); }
+.cf-table tr.negative td.result { color: var(--danger); }
+.cf-table tr.positive td.acum { color: var(--success); }
+.cf-table tr.negative td.acum { color: var(--danger); }
+.cf-table tr.total td { font-weight: 700; background: #f5f2ed; border-top: 2px solid var(--black); }
+.cf-table input.inline-input {
+  border: 1px solid transparent; background: transparent;
+  font-family: var(--font-mono); font-size: 13px;
+  color: var(--black); text-align: right;
+  width: 100%; padding: 2px 4px;
+  border-radius: var(--radius); outline: none;
+}
+.cf-table input.inline-input:focus { border-color: var(--green); background: #fff; }
+
+/* ── CHARTS ──────────────────────────────────────────── */
+.chart-card {
+  background: #fff; border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 24px;
+  margin-bottom: 20px;
+}
+.chart-title { font-family: var(--font-display); font-size: 16px; font-weight: 700; margin-bottom: 2px; }
+.chart-sub { font-size: 11px; color: var(--muted); margin-bottom: 16px; }
+canvas { max-width: 100%; }
+
+/* ── SETTINGS ────────────────────────────────────────── */
+.settings-section {
+  background: #fff; border: 1px solid var(--border);
+  border-radius: var(--radius); margin-bottom: 20px;
+  overflow: hidden;
+}
+.settings-section-header {
+  padding: 16px 22px; border-bottom: 1px solid var(--border);
+  font-family: var(--font-display); font-size: 15px; font-weight: 700;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.settings-section-body { padding: 22px; }
+
+/* ── UPCOMING WIDGET ─────────────────────────────────── */
+.upcoming-card {
+  background: #fff; border: 1px solid var(--border);
+  border-radius: var(--radius); margin-top: 20px;
+  overflow: hidden;
+}
+.upcoming-header {
+  padding: 14px 18px; background: #f5f2ed;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--muted);
+}
+.upcoming-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto auto;
+  gap: 12px; align-items: center;
+  padding: 11px 18px; border-bottom: 1px solid #f0ece6;
+  font-size: 13px;
+}
+.upcoming-row.overdue { background: #fff8f8; }
+.upcoming-row:last-child { border-bottom: none; }
+
+/* ── SIDE PANEL ──────────────────────────────────────── */
+.side-panel-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 900;
+}
+.side-panel {
+  position: fixed; top: 0; right: 0;
+  width: 420px; height: 100vh;
+  background: #fff; border-left: 1px solid var(--border);
+  z-index: 901; overflow-y: auto;
+  animation: slideLeft 0.2s ease;
+}
+@keyframes slideLeft { from { transform: translateX(40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+.panel-header {
+  padding: 22px 24px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  position: sticky; top: 0; background: #fff; z-index: 1;
+}
+.panel-title { font-family: var(--font-display); font-size: 18px; font-weight: 700; }
+.panel-body { padding: 20px 24px; }
+
+/* ── SKELETON ────────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(90deg, #f0ece6 25%, #e8e4de 50%, #f0ece6 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: var(--radius);
+}
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+/* ── EMPTY STATE ─────────────────────────────────────── */
+.empty-state {
+  text-align: center; padding: 60px 24px;
+}
+.empty-amount {
+  font-family: var(--font-mono); font-size: 48px;
+  font-weight: 600; color: rgba(25,144,58,0.15);
+  line-height: 1; margin-bottom: 12px;
+}
+.empty-msg { font-size: 14px; color: var(--muted); margin-bottom: 20px; }
+
+/* ── SYNC INDICATOR ──────────────────────────────────── */
+.sync-indicator {
+  position: fixed; bottom: 16px; left: 16px;
+  font-size: 10px; color: var(--muted);
+  font-family: var(--font-mono);
+  background: rgba(255,255,255,0.9);
+  padding: 4px 8px; border-radius: 2px;
+  border: 1px solid var(--border);
+  pointer-events: none;
+}
+
+/* ── CONFIRM DIALOG ──────────────────────────────────── */
+.confirm-dialog {
+  background: #fff; width: 100%; max-width: 420px;
+  border-radius: var(--radius); padding: 28px;
+  animation: slideUp 0.2s ease;
+}
+.confirm-title { font-family: var(--font-display); font-size: 18px; font-weight: 700; margin-bottom: 10px; }
+.confirm-msg { font-size: 13px; color: var(--muted); margin-bottom: 22px; line-height: 1.5; }
+
+/* ── RESPONSIVE ──────────────────────────────────────── */
+@media (max-width: 900px) {
+  .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+  .metrics-grid-2 { grid-template-columns: repeat(2, 1fr); }
+  .form-grid { grid-template-columns: 1fr; }
+  .sidebar { width: var(--sidebar-collapsed); }
+  .sidebar-brand-name, .sidebar-brand-sub, .sidebar-brand-rule { display: none; }
+  .nav-item span { display: none; }
+  .nav-badge { display: none; }
+  .user-info { display: none; }
+  .page { padding: 20px 16px; }
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback, useMemo, createContext, useContext } = React;
+
+/* ═══════════════════════════════════════════════════════
+   CONFIGURATION — REPLACE BEFORE RUNNING
+═══════════════════════════════════════════════════════ */
+const SUPABASE_URL = 'https://xhddxlkltqzmvhnutulm.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_0IM-bG8x5pPC71ZTIbcknQ_U1UUsd5R';
+
+/* ═══════════════════════════════════════════════════════
+   SUPABASE CLIENT
+═══════════════════════════════════════════════════════ */
+const { createClient } = supabase;
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { persistSession: true, autoRefreshToken: true }
+});
+
+/* ═══════════════════════════════════════════════════════
+   INDEXEDDB OFFLINE CACHE
+═══════════════════════════════════════════════════════ */
+const DB_NAME = 'vg-finance-cache';
+const DB_VERSION = 1;
+
+function openDB() {
+  return new Promise((res, rej) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = e => {
+      const db = e.target.result;
+      ['expenses','suppliers','revenue','forecast','profiles','pending_sync'].forEach(s => {
+        if (!db.objectStoreNames.contains(s)) db.createObjectStore(s);
+      });
+    };
+    req.onsuccess = e => res(e.target.result);
+    req.onerror = e => rej(e.target.error);
+  });
+}
+
+async function idbSet(store, key, value) {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(store, 'readwrite');
+    tx.objectStore(store).put(value, key);
+    tx.oncomplete = res;
+    tx.onerror = rej;
+  });
+}
+
+async function idbGet(store, key) {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(store, 'readonly');
+    const req = tx.objectStore(store).get(key);
+    req.onsuccess = e => res(e.target.result);
+    req.onerror = rej;
+  });
+}
+
+async function addPendingSync(op) {
+  const existing = await idbGet('pending_sync', 'queue') || [];
+  existing.push(op);
+  await idbSet('pending_sync', 'queue', existing);
+}
+
+async function processPendingSync() {
+  const queue = await idbGet('pending_sync', 'queue') || [];
+  if (!queue.length) return;
+  const remaining = [];
+  for (const op of queue) {
+    try {
+      if (op.type === 'insert') await sb.from(op.table).insert(op.data);
+      else if (op.type === 'update') await sb.from(op.table).update(op.data).eq('id', op.id);
+      else if (op.type === 'delete') await sb.from(op.table).delete().eq('id', op.id);
+    } catch { remaining.push(op); }
+  }
+  await idbSet('pending_sync', 'queue', remaining);
+}
+
+/* ═══════════════════════════════════════════════════════
+   HELPERS
+═══════════════════════════════════════════════════════ */
+function fmtBRL(n) {
+  if (n === null || n === undefined || n === '') return 'R$ 0,00';
+  const num = parseFloat(n) || 0;
+  return 'R$ ' + Math.abs(num).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtBRLSigned(n) {
+  const num = parseFloat(n) || 0;
+  const sign = num < 0 ? '− ' : '';
+  return sign + 'R$ ' + Math.abs(num).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtDate(d) {
+  if (!d) return '—';
+  const dt = new Date(d + 'T00:00:00');
+  return dt.toLocaleDateString('pt-BR');
+}
+function todayISO() {
+  return new Date().toISOString().split('T')[0];
+}
+function monthISO(d = new Date()) {
+  return d.toISOString().slice(0,7);
+}
+function parseBRLInput(s) {
+  if (!s) return 0;
+  return parseFloat(s.toString().replace(/\./g,'').replace(',','.')) || 0;
+}
+function isOverdue(dateStr, status) {
+  if (status === 'pago') return false;
+  return dateStr < todayISO();
+}
+function isToday(dateStr) {
+  return dateStr === todayISO();
+}
+function getMonthLabel(ym) {
+  const [y, m] = ym.split('-');
+  const months = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  return months[parseInt(m)-1] + '/' + y.slice(2);
+}
+function getFullMonthLabel(ym) {
+  const [y, m] = ym.split('-');
+  const months = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  return months[parseInt(m)-1] + ' ' + y;
+}
+
+/* ═══════════════════════════════════════════════════════
+   CONTEXTS
+═══════════════════════════════════════════════════════ */
+const AppCtx = createContext(null);
+
+function useApp() { return useContext(AppCtx); }
+
+/* ═══════════════════════════════════════════════════════
+   DEFAULT SUPPLIERS
+═══════════════════════════════════════════════════════ */
+const DEFAULT_SUPPLIERS = [
+  { name: 'Irati', category: 'Laticínios/Frios' },
+  { name: 'Mega G', category: 'Distribuidora' },
+  { name: 'Maria Fumaça', category: 'Embalagens' },
+  { name: 'Princesa do Oeste', category: 'Carnes' },
+  { name: 'Atalaia', category: 'Bebidas' },
+  { name: 'Viaggio', category: 'Distribuidora' },
+  { name: 'Bonfiore', category: 'Insumos' },
+  { name: 'C Trade', category: 'Distribuidora' },
+  { name: 'Verisure', category: 'Segurança' },
+  { name: 'Enel', category: 'Energia' },
+  { name: 'Sabesp', category: 'Água' },
+  { name: 'Comgas', category: 'Gás' },
+  { name: 'Vivo', category: 'Telefonia' },
+  { name: 'Abrasel', category: 'Associação' },
+  { name: 'DKB Motoboys', category: 'Motoboys' },
+];
+
+const CATEGORIES = ['Compras','Gastos Fixos','Gastos Variáveis','Gastos Gerais','Impostos','Salários'];
+const PAYMENT_METHODS = ['PIX','Boleto','Cartão C6','Dinheiro','Débito Automático'];
+const SUPPLIER_CATEGORIES = ['Laticínios/Frios','Carnes','Embalagens','Bebidas','Distribuidora','Insumos','Segurança','Energia','Água','Gás','Telefonia','Associação','Motoboys','Contabilidade','Outros'];
+
+/* ═══════════════════════════════════════════════════════
+   TOAST MANAGER
+═══════════════════════════════════════════════════════ */
+let _toastId = 0;
+let _setToasts = null;
+
+function toast(msg, type = 'info') {
+  if (!_setToasts) return;
+  const id = ++_toastId;
+  _setToasts(p => [...p, { id, msg, type }]);
+  setTimeout(() => _setToasts(p => p.filter(t => t.id !== id)), 3500);
+}
+
+function ToastContainer() {
+  const [toasts, setToasts] = useState([]);
+  useEffect(() => { _setToasts = setToasts; }, []);
+  return (
+    <div className="toast-container">
+      {toasts.map(t => (
+        <div key={t.id} className={`toast ${t.type}`}>{t.msg}</div>
+      ))}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   CONFIRM DIALOG
+═══════════════════════════════════════════════════════ */
+function ConfirmDialog({ title, msg, onConfirm, onCancel }) {
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="confirm-dialog" onClick={e => e.stopPropagation()}>
+        <div className="confirm-title">{title}</div>
+        <div className="confirm-msg">{msg}</div>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button className="btn btn-secondary" onClick={onCancel}>Cancelar</button>
+          <button className="btn btn-danger" onClick={onConfirm}>Confirmar Exclusão</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   AUTH SCREEN
+═══════════════════════════════════════════════════════ */
+function AuthScreen({ onLogin }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [mode, setMode] = useState('login'); // login | forgot
+
+  async function handleLogin(e) {
+    e.preventDefault();
+    setLoading(true); setError('');
+    const { data, error } = await sb.auth.signInWithPassword({ email, password });
+    if (error) { setError(error.message); setLoading(false); return; }
+    onLogin(data.session);
+    setLoading(false);
+  }
+
+  async function handleForgot(e) {
+    e.preventDefault();
+    setLoading(true); setError('');
+    const { error } = await sb.auth.resetPasswordForEmail(email);
+    if (error) { setError(error.message); setLoading(false); return; }
+    toast('E-mail de recuperação enviado!', 'success');
+    setMode('login'); setLoading(false);
+  }
+
+  return (
+    <div className="auth-screen">
+      <div className="auth-card">
+        <div className="auth-logo">VITTO &amp; GIULIO</div>
+        <div className="auth-logo-sub">Pizza · São Paulo</div>
+        <div className="auth-rule" />
+        <div className="auth-title">{mode === 'login' ? 'Acesso ao Sistema' : 'Recuperar Senha'}</div>
+        {error && <div className="auth-error">{error}</div>}
+        <form onSubmit={mode === 'login' ? handleLogin : handleForgot}>
+          <div className="auth-field">
+            <label>E-mail</label>
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} required autoFocus />
+          </div>
+          {mode === 'login' && (
+            <div className="auth-field">
+              <label>Senha</label>
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} required />
+            </div>
+          )}
+          <button className="auth-btn" type="submit" disabled={loading}>
+            {loading ? 'Aguarde...' : mode === 'login' ? 'Entrar' : 'Enviar E-mail'}
+          </button>
+        </form>
+        <span className="auth-link" onClick={() => setMode(mode === 'login' ? 'forgot' : 'login')}>
+          {mode === 'login' ? 'Esqueci minha senha' : '← Voltar ao login'}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   EXPENSE MODAL
+═══════════════════════════════════════════════════════ */
+function ExpenseModal({ expense, suppliers, onSave, onClose }) {
+  const [form, setForm] = useState({
+    supplier_name: expense?.supplier_name || '',
+    supplier_id: expense?.supplier_id || '',
+    category: expense?.category || '',
+    expense_type: expense?.expense_type || '',
+    amount: expense ? expense.amount.toString().replace('.',',') : '',
+    due_date: expense?.due_date || todayISO(),
+    payment_method: expense?.payment_method || '',
+    payment_details: expense?.payment_details || '',
+    status: expense?.status || 'pendente',
+    paid_date: expense?.paid_date || '',
+    recurring: expense?.recurring || false,
+    frequency: expense?.frequency || '',
+    week_range: expense?.week_range || '',
+    notes: expense?.notes || '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  const filtered = suppliers.filter(s =>
+    form.supplier_name && s.name.toLowerCase().includes(form.supplier_name.toLowerCase())
+  );
+
+  function set(k, v) { setForm(p => ({ ...p, [k]: v })); }
+
+  async function handleSave() {
+    if (!form.supplier_name || !form.category || !form.amount || !form.due_date) {
+      toast('Preencha os campos obrigatórios.', 'error'); return;
+    }
+    setSaving(true);
+    const payload = {
+      ...form,
+      amount: parseBRLInput(form.amount),
+      paid_date: form.status === 'pago' ? (form.paid_date || todayISO()) : null,
+    };
+    await onSave(payload);
+    setSaving(false);
+  }
+
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">{expense ? 'Editar Despesa' : 'Nova Despesa'}</div>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          <div className="form-grid">
+            <div className="form-group full" style={{ position: 'relative' }}>
+              <label className="form-label">Fornecedor *</label>
+              <input
+                className="form-control"
+                value={form.supplier_name}
+                onChange={e => { set('supplier_name', e.target.value); set('supplier_id', ''); setShowSuggestions(true); }}
+                onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                placeholder="Nome do fornecedor"
+              />
+              {showSuggestions && filtered.length > 0 && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid var(--border)', borderTop: 'none', zIndex: 10, borderRadius: '0 0 3px 3px', maxHeight: 160, overflowY: 'auto' }}>
+                  {filtered.map(s => (
+                    <div key={s.id} style={{ padding: '9px 12px', cursor: 'pointer', fontSize: 13 }}
+                      onMouseDown={() => { set('supplier_name', s.name); set('supplier_id', s.id); setShowSuggestions(false); }}>
+                      <strong>{s.name}</strong> <span style={{ color: 'var(--muted)', fontSize: 11 }}>{s.category}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Categoria *</label>
+              <select className="form-control" value={form.category} onChange={e => set('category', e.target.value)}>
+                <option value="">Selecionar...</option>
+                {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Tipo de Gasto</label>
+              <input className="form-control" value={form.expense_type} onChange={e => set('expense_type', e.target.value)} placeholder="Ex: Mussarela" />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Valor (R$) *</label>
+              <input className="form-control mono" value={form.amount} onChange={e => set('amount', e.target.value)} placeholder="0,00" />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Vencimento *</label>
+              <input className="form-control" type="date" value={form.due_date} onChange={e => set('due_date', e.target.value)} />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Forma de Pagamento</label>
+              <select className="form-control" value={form.payment_method} onChange={e => set('payment_method', e.target.value)}>
+                <option value="">Selecionar...</option>
+                {PAYMENT_METHODS.map(p => <option key={p}>{p}</option>)}
+              </select>
+            </div>
+
+            <div className="form-group full">
+              <label className="form-label">
+                {form.payment_method === 'PIX' ? 'Chave PIX' :
+                 form.payment_method === 'Boleto' ? 'Código de Barras / Linha Digitável' :
+                 'Dados de Pagamento'}
+              </label>
+              <textarea
+                className="form-control mono"
+                rows={3}
+                value={form.payment_details}
+                onChange={e => set('payment_details', e.target.value)}
+                placeholder={
+                  form.payment_method === 'PIX' ? 'Cole a chave PIX (CPF, CNPJ, e-mail, telefone ou chave aleatória)...' :
+                  form.payment_method === 'Boleto' ? 'Cole o código de barras ou linha digitável...' :
+                  'Cole os dados de pagamento aqui...'
+                }
+                style={{ resize: 'vertical', fontSize: 12, fontFamily: 'var(--font-mono)', letterSpacing: '0.02em', minHeight: 72 }}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Status</label>
+              <select className="form-control" value={form.status} onChange={e => set('status', e.target.value)}>
+                <option value="pendente">Pendente</option>
+                <option value="pago">Pago</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Semana</label>
+              <input className="form-control" value={form.week_range} onChange={e => set('week_range', e.target.value)} placeholder="Ex: 05/01 - 11/01" />
+            </div>
+
+            <div className="form-group full">
+              <label className="form-label">Recorrente?</label>
+              <div className="toggle-row">
+                <button type="button" className={`toggle-switch ${form.recurring ? 'on' : ''}`} onClick={() => set('recurring', !form.recurring)} />
+                <span style={{ fontSize: 13, color: 'var(--muted)' }}>{form.recurring ? 'Sim' : 'Não'}</span>
+                {form.recurring && (
+                  <select className="form-control" style={{ width: 'auto', marginLeft: 12 }} value={form.frequency} onChange={e => set('frequency', e.target.value)}>
+                    <option value="">Frequência...</option>
+                    <option value="semanal">Semanal</option>
+                    <option value="mensal">Mensal</option>
+                    <option value="anual">Anual</option>
+                  </select>
+                )}
+              </div>
+            </div>
+
+            <div className="form-group full">
+              <label className="form-label">Observações</label>
+              <textarea className="form-control" rows={2} value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="Notas adicionais..." style={{ resize: 'vertical' }} />
+            </div>
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? 'Salvando...' : 'Salvar Despesa'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   MODULE 1 — DASHBOARD
+═══════════════════════════════════════════════════════ */
+function Dashboard({ expenses, revenue, showModal }) {
+  const now = new Date();
+  const currentMonth = monthISO(now);
+  const chartRef = useRef(null);
+  const chartInstance = useRef(null);
+
+  const monthExpenses = expenses.filter(e => e.due_date.startsWith(currentMonth));
+  const monthRevenue = revenue.filter(r => r.month === currentMonth).reduce((a, b) => a + b.amount, 0);
+  const monthPaid = monthExpenses.reduce((a, b) => a + b.amount, 0);
+  const monthResult = monthRevenue - monthPaid;
+
+  const ytdPrefix = now.getFullYear().toString();
+  const ytdExp = expenses.filter(e => e.due_date.startsWith(ytdPrefix));
+  const ytdRev = revenue.filter(r => r.month.startsWith(ytdPrefix)).reduce((a,b) => a + b.amount, 0);
+  const ytdExpTotal = ytdExp.reduce((a,b) => a + b.amount, 0);
+  const ytdResult = ytdRev - ytdExpTotal;
+
+  const allPaid = expenses.reduce((a,b) => a + b.amount, 0);
+  const allRev = revenue.reduce((a,b) => a + b.amount, 0);
+  const balance = allRev - allPaid;
+
+  const today = todayISO();
+  const in7days = new Date(); in7days.setDate(in7days.getDate() + 7);
+  const in7ISO = in7days.toISOString().split('T')[0];
+
+  const upcoming = expenses
+    .filter(e => e.status === 'pendente' && e.due_date <= in7ISO)
+    .sort((a,b) => a.due_date.localeCompare(b.due_date));
+
+  useEffect(() => {
+    if (!chartRef.current) return;
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push(monthISO(d));
+    }
+    const revData = months.map(m => revenue.filter(r => r.month === m).reduce((a,b) => a+b.amount, 0));
+    const expData = months.map(m => expenses.filter(e => e.due_date.startsWith(m)).reduce((a,b) => a+b.amount, 0));
+
+    if (chartInstance.current) chartInstance.current.destroy();
+    chartInstance.current = new Chart(chartRef.current, {
+      type: 'bar',
+      data: {
+        labels: months.map(getMonthLabel),
+        datasets: [
+          { label: 'Receita', data: revData, backgroundColor: '#19903a', borderRadius: 2 },
+          { label: 'Despesas', data: expData, backgroundColor: '#000', borderRadius: 2 },
+        ]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { labels: { font: { family: 'DM Sans', size: 12 } } } },
+        scales: {
+          y: { ticks: { callback: v => 'R$ ' + (v/1000).toFixed(0) + 'k', font: { family: 'JetBrains Mono', size: 11 } }, grid: { color: '#f0ece6' } },
+          x: { ticks: { font: { family: 'DM Sans', size: 11 } }, grid: { display: false } }
+        }
+      }
+    });
+    return () => { if (chartInstance.current) chartInstance.current.destroy(); };
+  }, [expenses, revenue]);
+
+  return (
+    <div className="page">
+      <div className="page-header">
+        <div className="page-title">Dashboard</div>
+        <div className="page-subtitle">{getFullMonthLabel(currentMonth)}</div>
+      </div>
+
+      <div className="metrics-grid">
+        <div className="metric-card">
+          <div className="metric-label">Receita do Mês</div>
+          <div className="metric-value green">{fmtBRL(monthRevenue)}</div>
+        </div>
+        <div className="metric-card">
+          <div className="metric-label">Despesas do Mês</div>
+          <div className="metric-value">{fmtBRL(monthPaid)}</div>
+        </div>
+        <div className="metric-card">
+          <div className="metric-label">Resultado do Mês</div>
+          <div className={`metric-value ${monthResult >= 0 ? 'positive' : 'negative'}`}>{fmtBRLSigned(monthResult)}</div>
+        </div>
+        <div className="metric-card">
+          <div className="metric-label">Saldo em Caixa</div>
+          <div className={`metric-value ${balance >= 0 ? 'positive' : 'negative'}`}>{fmtBRLSigned(balance)}</div>
+        </div>
+      </div>
+
+      <div className="metrics-grid metrics-grid-2">
+        <div className="metric-card">
+          <div className="metric-label">YTD Receita</div>
+          <div className="metric-value green">{fmtBRL(ytdRev)}</div>
+        </div>
+        <div className="metric-card">
+          <div className="metric-label">YTD Despesas</div>
+          <div className="metric-value">{fmtBRL(ytdExpTotal)}</div>
+        </div>
+        <div className="metric-card">
+          <div className="metric-label">YTD Resultado</div>
+          <div className={`metric-value ${ytdResult >= 0 ? 'positive' : 'negative'}`}>{fmtBRLSigned(ytdResult)}</div>
+        </div>
+      </div>
+
+      <div className="chart-card">
+        <div className="chart-title">Receita vs. Despesas</div>
+        <div className="chart-sub">Últimos 6 meses</div>
+        <canvas ref={chartRef} height={80} />
+      </div>
+
+      <div className="upcoming-card">
+        <div className="upcoming-header">⏰ Próximos Vencimentos — 7 dias</div>
+        {upcoming.length === 0 ? (
+          <div style={{ padding: '20px 18px', fontSize: 13, color: 'var(--muted)' }}>Nenhum vencimento nos próximos 7 dias.</div>
+        ) : upcoming.map(e => (
+          <div key={e.id} className={`upcoming-row ${isOverdue(e.due_date, e.status) ? 'overdue' : ''}`}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 13 }}>{e.supplier_name}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.category}</div>
+            </div>
+            <div className="mono" style={{ fontWeight: 600 }}>{fmtBRL(e.amount)}</div>
+            <div style={{ fontSize: 12, color: isOverdue(e.due_date, e.status) ? 'var(--danger)' : 'var(--muted)' }}>
+              {isOverdue(e.due_date, e.status) ? '⚠ Vencido ' : ''}{fmtDate(e.due_date)}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.payment_method || '—'}</div>
+            <button className="btn btn-primary btn-sm" onClick={() => showModal('pay', e)}>Pagar</button>
+          </div>
+        ))}
+      </div>
+
+      <button className="fab" onClick={() => showModal('expense')} title="Nova Despesa (N)">+</button>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   MODULE 2 — CONTAS A PAGAR
+═══════════════════════════════════════════════════════ */
+function ContasPagar({ expenses, suppliers, revenue, onRefresh, isOwner }) {
+  const [filter, setFilter] = useState({ status: 'todos', category: '', search: '', from: '', to: '' });
+  const [modal, setModal] = useState(null); // null | {type:'new'} | {type:'edit',exp}
+  const [confirm, setConfirm] = useState(null);
+
+  const filtered = useMemo(() => {
+    return expenses.filter(e => {
+      if (filter.status !== 'todos' && e.status !== filter.status) return false;
+      if (filter.category && e.category !== filter.category) return false;
+      if (filter.search && !e.supplier_name.toLowerCase().includes(filter.search.toLowerCase())) return false;
+      if (filter.from && e.due_date < filter.from) return false;
+      if (filter.to && e.due_date > filter.to) return false;
+      return true;
+    }).sort((a, b) => {
+      const aOv = isOverdue(a.due_date, a.status);
+      const bOv = isOverdue(b.due_date, b.status);
+      if (aOv && !bOv) return -1;
+      if (!aOv && bOv) return 1;
+      return a.due_date.localeCompare(b.due_date);
+    });
+  }, [expenses, filter]);
+
+  const overdueCount = expenses.filter(e => isOverdue(e.due_date, e.status)).length;
+
+  // Weekly summary
+  const weekRevenue = revenue.reduce((a,b) => a + b.amount, 0);
+  const weekExp = filtered.reduce((a,b) => a + b.amount, 0);
+  const weekDiff = weekRevenue - weekExp;
+
+  async function handleSave(payload) {
+    const user = (await sb.auth.getUser()).data.user;
+    if (modal.expense) {
+      const { error } = await sb.from('expenses').update({ ...payload, created_by: user.id }).eq('id', modal.expense.id);
+      if (error) { toast('Erro ao salvar: ' + error.message, 'error'); return; }
+    } else {
+      const { error } = await sb.from('expenses').insert({ ...payload, created_by: user.id });
+      if (error) { toast('Erro ao salvar: ' + error.message, 'error'); return; }
+    }
+    toast('Despesa salva com sucesso!', 'success');
+    setModal(null);
+    onRefresh();
+  }
+
+  async function markPaid(exp) {
+    const { error } = await sb.from('expenses').update({ status: 'pago', paid_date: todayISO() }).eq('id', exp.id);
+    if (error) { toast('Erro: ' + error.message, 'error'); return; }
+    toast('Marcado como pago!', 'success');
+    onRefresh();
+  }
+
+  async function markPending(exp) {
+    const { error } = await sb.from('expenses').update({ status: 'pendente', paid_date: null }).eq('id', exp.id);
+    if (error) { toast('Erro: ' + error.message, 'error'); return; }
+    toast('Reaberto como pendente.', 'info');
+    onRefresh();
+  }
+
+  async function handleDelete(id) {
+    const { error } = await sb.from('expenses').delete().eq('id', id);
+    if (error) { toast('Erro: ' + error.message, 'error'); return; }
+    toast('Despesa excluída.', 'info');
+    setConfirm(null);
+    onRefresh();
+  }
+
+  return (
+    <div className="page">
+      <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div className="page-title">Contas a Pagar</div>
+          {overdueCount > 0 && <div className="page-subtitle" style={{ color: 'var(--danger)', fontWeight: 600 }}>⚠ {overdueCount} vencida{overdueCount > 1 ? 's' : ''}</div>}
+        </div>
+        <button className="btn btn-primary" onClick={() => setModal({ type: 'new' })}>+ Nova Despesa</button>
+      </div>
+
+      <div className="weekly-summary">
+        <div>
+          <div className="weekly-stat-label">Gastos Filtrados</div>
+          <div className="weekly-stat-value">{fmtBRL(weekExp)}</div>
+        </div>
+        <div>
+          <div className="weekly-stat-label">Total Pendente</div>
+          <div className="weekly-stat-value">{fmtBRL(expenses.filter(e=>e.status==='pendente').reduce((a,b)=>a+b.amount,0))}</div>
+        </div>
+        <div>
+          <div className="weekly-stat-label">Total Pago (mês)</div>
+          <div className="weekly-stat-value pos">{fmtBRL(expenses.filter(e=>e.status==='pago'&&e.due_date.startsWith(monthISO())).reduce((a,b)=>a+b.amount,0))}</div>
+        </div>
+      </div>
+
+      <div className="filters-bar">
+        <input className="form-control" placeholder="Buscar fornecedor..." value={filter.search} onChange={e => setFilter(p=>({...p,search:e.target.value}))} style={{ minWidth: 200 }} />
+        <select className="form-control" value={filter.status} onChange={e => setFilter(p=>({...p,status:e.target.value}))}>
+          <option value="todos">Todos</option>
+          <option value="pendente">Pendente</option>
+          <option value="pago">Pago</option>
+        </select>
+        <select className="form-control" value={filter.category} onChange={e => setFilter(p=>({...p,category:e.target.value}))}>
+          <option value="">Todas categorias</option>
+          {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+        </select>
+        <input className="form-control" type="date" value={filter.from} onChange={e => setFilter(p=>({...p,from:e.target.value}))} placeholder="De" />
+        <input className="form-control" type="date" value={filter.to} onChange={e => setFilter(p=>({...p,to:e.target.value}))} placeholder="Até" />
+        <button className="btn btn-ghost btn-sm" onClick={() => setFilter({ status:'todos',category:'',search:'',from:'',to:'' })}>Limpar</button>
+      </div>
+
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Fornecedor</th>
+              <th>Categoria</th>
+              <th>Tipo</th>
+              <th>Valor</th>
+              <th>Vencimento</th>
+              <th>Forma Pgto</th>
+              <th>Status</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr><td colSpan={8} style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Nenhuma despesa encontrada.</td></tr>
+            ) : filtered.map(e => {
+              const ov = isOverdue(e.due_date, e.status);
+              const td = isToday(e.due_date) && e.status !== 'pago';
+              return (
+                <tr key={e.id} className={ov ? 'overdue' : td ? 'today' : e.status === 'pago' ? 'paid' : ''}>
+                  <td><strong>{e.supplier_name}</strong></td>
+                  <td><span style={{ fontSize: 11, color: 'var(--muted)' }}>{e.category}</span></td>
+                  <td style={{ fontSize: 12, color: 'var(--muted)' }}>{e.expense_type || '—'}</td>
+                  <td className="mono amount-cell" style={{ fontWeight: 600 }}>{fmtBRL(e.amount)}</td>
+                  <td style={{ fontSize: 12, color: ov ? 'var(--danger)' : 'inherit' }}>{fmtDate(e.due_date)}</td>
+                  <td style={{ fontSize: 12 }}>
+                    <div>{e.payment_method || '—'}</div>
+                    {e.payment_details && (
+                      <div title={e.payment_details} style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'var(--font-mono)', marginTop: 2, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'help' }}>
+                        {e.payment_details}
+                      </div>
+                    )}
+                  </td>
+                  <td>
+                    {ov && e.status === 'pendente' ? <span className="badge badge-overdue">Vencido</span>
+                      : e.status === 'pago' ? <span className="badge badge-paid">Pago</span>
+                      : <span className="badge badge-pending">Pendente</span>}
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      {e.status === 'pendente' ? (
+                        <button className="btn btn-primary btn-sm" onClick={() => markPaid(e)}>✓ Pagar</button>
+                      ) : (
+                        <button className="btn btn-ghost btn-sm" onClick={() => markPending(e)}>↩ Reabrir</button>
+                      )}
+                      <button className="btn btn-ghost btn-sm" onClick={() => setModal({ type: 'edit', expense: e })}>✎</button>
+                      {isOwner && <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => setConfirm(e)}>✕</button>}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {modal && (
+        <ExpenseModal
+          expense={modal.expense}
+          suppliers={suppliers}
+          onSave={handleSave}
+          onClose={() => setModal(null)}
+        />
+      )}
+
+      {confirm && (
+        <ConfirmDialog
+          title="Excluir Despesa"
+          msg={`Deseja excluir a despesa de ${fmtBRL(confirm.amount)} para ${confirm.supplier_name}? Esta ação não pode ser desfeita.`}
+          onConfirm={() => handleDelete(confirm.id)}
+          onCancel={() => setConfirm(null)}
+        />
+      )}
+
+      <button className="fab" onClick={() => setModal({ type: 'new' })} title="Nova Despesa (N)">+</button>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   MODULE 3 — FORNECEDORES
+═══════════════════════════════════════════════════════ */
+function Fornecedores({ suppliers, expenses, onRefresh, isOwner }) {
+  const [view, setView] = useState('card'); // card | table
+  const [search, setSearch] = useState('');
+  const [catFilter, setCatFilter] = useState('');
+  const [panel, setPanel] = useState(null);
+  const [modal, setModal] = useState(null);
+  const [confirm, setConfirm] = useState(null);
+
+  const filtered = suppliers.filter(s => {
+    if (catFilter && s.category !== catFilter) return false;
+    if (search && !s.name.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
+
+  function supplierStats(sid) {
+    const exps = expenses.filter(e => e.supplier_id === sid || e.supplier_name === (suppliers.find(s=>s.id===sid)||{}).name);
+    const total = exps.reduce((a,b) => a + b.amount, 0);
+    const last = exps.sort((a,b) => b.due_date.localeCompare(a.due_date))[0];
+    return { total, last: last?.due_date };
+  }
+
+  async function handleSave(form) {
+    if (panel && panel.id) {
+      const { error } = await sb.from('suppliers').update(form).eq('id', panel.id);
+      if (error) { toast('Erro: ' + error.message, 'error'); return; }
+    } else {
+      const { error } = await sb.from('suppliers').insert(form);
+      if (error) { toast('Erro: ' + error.message, 'error'); return; }
+    }
+    toast('Fornecedor salvo!', 'success');
+    setModal(null); setPanel(null);
+    onRefresh();
+  }
+
+  async function handleDelete(id) {
+    const { error } = await sb.from('suppliers').delete().eq('id', id);
+    if (error) { toast('Erro: ' + error.message, 'error'); return; }
+    toast('Fornecedor excluído.', 'info');
+    setConfirm(null); setPanel(null);
+    onRefresh();
+  }
+
+  return (
+    <div className="page">
+      <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div className="page-title">Fornecedores</div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button className={`btn ${view==='card'?'btn-primary':'btn-secondary'}`} onClick={() => setView('card')}>⊞ Cards</button>
+          <button className={`btn ${view==='table'?'btn-primary':'btn-secondary'}`} onClick={() => setView('table')}>≡ Tabela</button>
+          {isOwner && <button className="btn btn-primary" onClick={() => setModal({ mode: 'new' })}>+ Novo</button>}
+        </div>
+      </div>
+
+      <div className="filters-bar">
+        <input className="form-control" placeholder="Buscar..." value={search} onChange={e => setSearch(e.target.value)} style={{ minWidth: 200 }} />
+        <select className="form-control" value={catFilter} onChange={e => setCatFilter(e.target.value)}>
+          <option value="">Todas categorias</option>
+          {SUPPLIER_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+        </select>
+        <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setCatFilter(''); }}>Limpar</button>
+      </div>
+
+      {view === 'card' ? (
+        <div className="card-grid">
+          {filtered.map(s => {
+            const { total, last } = supplierStats(s.id);
+            return (
+              <div key={s.id} className="supplier-card" onClick={() => setPanel(s)}>
+                <div className="supplier-card-name">{s.name}</div>
+                <div className="supplier-card-cat">{s.category}</div>
+                <div className="supplier-card-stats">
+                  <div className="supplier-stat"><strong>{fmtBRL(total)}</strong>Total gasto</div>
+                  <div className="supplier-stat"><strong>{last ? fmtDate(last) : '—'}</strong>Última compra</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Nome</th><th>Categoria</th><th>Forma Pagto</th><th>Total Gasto</th><th>Última Compra</th><th>Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(s => {
+                const { total, last } = supplierStats(s.id);
+                return (
+                  <tr key={s.id}>
+                    <td><strong>{s.name}</strong></td>
+                    <td>{s.category}</td>
+                    <td style={{ fontSize: 12, color: 'var(--muted)' }}>{s.default_payment_method || '—'}</td>
+                    <td className="mono">{fmtBRL(total)}</td>
+                    <td style={{ fontSize: 12 }}>{last ? fmtDate(last) : '—'}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button className="btn btn-ghost btn-sm" onClick={() => setPanel(s)}>Ver</button>
+                        {isOwner && <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => setConfirm(s)}>✕</button>}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Side panel */}
+      {panel && (
+        <>
+          <div className="side-panel-overlay" onClick={() => setPanel(null)} />
+          <div className="side-panel">
+            <div className="panel-header">
+              <div className="panel-title">{panel.name}</div>
+              <button className="modal-close" onClick={() => setPanel(null)}>✕</button>
+            </div>
+            <div className="panel-body">
+              <SupplierDetail
+                supplier={panel}
+                expenses={expenses}
+                isOwner={isOwner}
+                onEdit={() => setModal({ mode: 'edit', supplier: panel })}
+                onDelete={() => setConfirm(panel)}
+              />
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Add/Edit modal */}
+      {modal && (
+        <SupplierModal
+          supplier={modal.supplier}
+          onSave={handleSave}
+          onClose={() => setModal(null)}
+        />
+      )}
+
+      {confirm && (
+        <ConfirmDialog
+          title="Excluir Fornecedor"
+          msg={`Deseja excluir ${confirm.name}? Esta ação não pode ser desfeita.`}
+          onConfirm={() => handleDelete(confirm.id)}
+          onCancel={() => setConfirm(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function SupplierDetail({ supplier, expenses, isOwner, onEdit, onDelete }) {
+  const supExp = expenses.filter(e => e.supplier_id === supplier.id || e.supplier_name === supplier.name);
+  const total = supExp.reduce((a,b) => a+b.amount, 0);
+  const months = [...new Set(supExp.map(e => e.due_date.slice(0,7)))];
+  const avg = months.length > 0 ? total / months.length : 0;
+  const last = supExp.sort((a,b) => b.due_date.localeCompare(a.due_date))[0];
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+        {isOwner && <button className="btn btn-secondary btn-sm" onClick={onEdit}>✎ Editar</button>}
+        {isOwner && <button className="btn btn-danger btn-sm" onClick={onDelete}>✕ Excluir</button>}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 20 }}>
+        <div className="metric-card" style={{ padding: '14px 16px' }}>
+          <div className="metric-label">Total Gasto</div>
+          <div className="metric-value" style={{ fontSize: 16 }}>{fmtBRL(total)}</div>
+        </div>
+        <div className="metric-card" style={{ padding: '14px 16px' }}>
+          <div className="metric-label">Média Mensal</div>
+          <div className="metric-value" style={{ fontSize: 16 }}>{fmtBRL(avg)}</div>
+        </div>
+        <div className="metric-card" style={{ padding: '14px 16px' }}>
+          <div className="metric-label">Última Compra</div>
+          <div className="metric-value" style={{ fontSize: 14 }}>{last ? fmtDate(last.due_date) : '—'}</div>
+        </div>
+      </div>
+
+      <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>Histórico de Pagamentos</div>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Data</th><th>Tipo</th><th>Valor</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            {supExp.length === 0 ? (
+              <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--muted)', padding: 24 }}>Sem histórico.</td></tr>
+            ) : supExp.sort((a,b)=>b.due_date.localeCompare(a.due_date)).slice(0,20).map(e => (
+              <tr key={e.id}>
+                <td style={{ fontSize: 12 }}>{fmtDate(e.due_date)}</td>
+                <td style={{ fontSize: 12 }}>{e.expense_type || e.category}</td>
+                <td className="mono" style={{ fontWeight: 600 }}>{fmtBRL(e.amount)}</td>
+                <td>{e.status === 'pago' ? <span className="badge badge-paid">Pago</span> : <span className="badge badge-pending">Pendente</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function SupplierModal({ supplier, onSave, onClose }) {
+  const [form, setForm] = useState({
+    name: supplier?.name || '',
+    category: supplier?.category || '',
+    contact: supplier?.contact || '',
+    default_payment_method: supplier?.default_payment_method || '',
+    notes: supplier?.notes || '',
+  });
+  function set(k,v) { setForm(p=>({...p,[k]:v})); }
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" onClick={e=>e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">{supplier ? 'Editar Fornecedor' : 'Novo Fornecedor'}</div>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          <div className="form-grid">
+            <div className="form-group full">
+              <label className="form-label">Nome *</label>
+              <input className="form-control" value={form.name} onChange={e=>set('name',e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Categoria *</label>
+              <select className="form-control" value={form.category} onChange={e=>set('category',e.target.value)}>
+                <option value="">Selecionar...</option>
+                {SUPPLIER_CATEGORIES.map(c=><option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Forma Pagto Padrão</label>
+              <select className="form-control" value={form.default_payment_method} onChange={e=>set('default_payment_method',e.target.value)}>
+                <option value="">—</option>
+                {PAYMENT_METHODS.map(p=><option key={p}>{p}</option>)}
+              </select>
+            </div>
+            <div className="form-group full">
+              <label className="form-label">Contato</label>
+              <input className="form-control" value={form.contact} onChange={e=>set('contact',e.target.value)} placeholder="Telefone, e-mail, etc." />
+            </div>
+            <div className="form-group full">
+              <label className="form-label">Observações</label>
+              <textarea className="form-control" rows={2} value={form.notes} onChange={e=>set('notes',e.target.value)} style={{ resize: 'vertical' }} />
+            </div>
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+          <button className="btn btn-primary" onClick={() => { if(!form.name||!form.category){toast('Preencha nome e categoria.','error');return;} onSave(form); }}>Salvar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   MODULE 4 — FLUXO DE CAIXA
+═══════════════════════════════════════════════════════ */
+function FluxoDeCaixa({ expenses, revenue, onRefresh }) {
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [editingRev, setEditingRev] = useState({});
+  const [saving, setSaving] = useState(false);
+
+  const months = Array.from({ length: 12 }, (_, i) => {
+    const m = String(i+1).padStart(2,'0');
+    return `${year}-${m}`;
+  });
+
+  function getRevenue(ym) {
+    return revenue.filter(r => r.month === ym).reduce((a,b) => a+b.amount, 0);
+  }
+  function getExpenses(ym) {
+    return expenses.filter(e => e.due_date.startsWith(ym) && e.status === 'pago').reduce((a,b) => a+b.amount, 0);
+  }
+
+  let cumulative = 0;
+  const rows = months.map(ym => {
+    const rev = editingRev[ym] !== undefined ? parseBRLInput(editingRev[ym]) : getRevenue(ym);
+    const exp = getExpenses(ym);
+    const result = rev - exp;
+    cumulative += result;
+    return { ym, rev, exp, result, cumulative };
+  });
+
+  const ytdRev = rows.reduce((a,r)=>a+r.rev,0);
+  const ytdExp = rows.reduce((a,r)=>a+r.exp,0);
+  const ytdResult = ytdRev - ytdExp;
+  const best = rows.reduce((a,r)=>r.result>a.result?r:a, rows[0]);
+  const worst = rows.reduce((a,r)=>r.result<a.result?r:a, rows[0]);
+
+  async function saveRevenue(ym) {
+    if (editingRev[ym] === undefined) return;
+    setSaving(true);
+    const amount = parseBRLInput(editingRev[ym]);
+    const existing = revenue.find(r => r.month === ym);
+    const user = (await sb.auth.getUser()).data.user;
+    if (existing) {
+      await sb.from('revenue').update({ amount, created_by: user.id }).eq('id', existing.id);
+    } else {
+      await sb.from('revenue').insert({ month: ym, amount, created_by: user.id });
+    }
+    setEditingRev(p => { const n={...p}; delete n[ym]; return n; });
+    setSaving(false);
+    toast('Receita atualizada!', 'success');
+    onRefresh();
+  }
+
+  function exportCSV() {
+    const header = 'Mês,Receita,Despesas,Resultado,Saldo Acumulado\n';
+    const body = rows.map(r =>
+      `${getFullMonthLabel(r.ym)},${r.rev.toFixed(2)},${r.exp.toFixed(2)},${r.result.toFixed(2)},${r.cumulative.toFixed(2)}`
+    ).join('\n');
+    const blob = new Blob([header+body], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download=`fluxo-${year}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div className="page">
+      <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div className="page-title">Fluxo de Caixa</div>
+          <div className="page-subtitle">Clique no campo Receita para editar</div>
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <button className="btn btn-ghost btn-sm" onClick={() => setYear(y=>y-1)}>◀</button>
+          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{year}</span>
+          <button className="btn btn-ghost btn-sm" onClick={() => setYear(y=>y+1)}>▶</button>
+          <button className="btn btn-secondary" onClick={exportCSV}>⬇ Exportar CSV</button>
+        </div>
+      </div>
+
+      <div className="metrics-grid" style={{ gridTemplateColumns: 'repeat(5, 1fr)', marginBottom: 24 }}>
+        <div className="metric-card">
+          <div className="metric-label">YTD Receita</div>
+          <div className="metric-value green">{fmtBRL(ytdRev)}</div>
+        </div>
+        <div className="metric-card">
+          <div className="metric-label">YTD Despesas</div>
+          <div className="metric-value">{fmtBRL(ytdExp)}</div>
+        </div>
+        <div className="metric-card">
+          <div className="metric-label">YTD Resultado</div>
+          <div className={`metric-value ${ytdResult>=0?'positive':'negative'}`}>{fmtBRLSigned(ytdResult)}</div>
+        </div>
+        <div className="metric-card">
+          <div className="metric-label">Melhor Mês</div>
+          <div className="metric-value green" style={{ fontSize: 15 }}>{best ? getMonthLabel(best.ym) : '—'}</div>
+        </div>
+        <div className="metric-card">
+          <div className="metric-label">Pior Mês</div>
+          <div className="metric-value negative" style={{ fontSize: 15 }}>{worst ? getMonthLabel(worst.ym) : '—'}</div>
+        </div>
+      </div>
+
+      <div className="table-wrap">
+        <table className="cf-table">
+          <thead>
+            <tr>
+              <th>Mês</th>
+              <th>Receita</th>
+              <th>Despesas (Pagas)</th>
+              <th>Resultado</th>
+              <th>Saldo Acumulado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.ym} className={r.result >= 0 ? 'positive' : 'negative'}>
+                <td>{getFullMonthLabel(r.ym)}</td>
+                <td>
+                  <input
+                    className="inline-input"
+                    value={editingRev[r.ym] !== undefined ? editingRev[r.ym] : r.rev.toFixed(2).replace('.',',')}
+                    onChange={e => setEditingRev(p=>({...p,[r.ym]:e.target.value}))}
+                    onBlur={() => saveRevenue(r.ym)}
+                    onKeyDown={e => { if(e.key==='Enter') saveRevenue(r.ym); }}
+                    style={{ color: 'var(--success)' }}
+                  />
+                </td>
+                <td>{fmtBRL(r.exp)}</td>
+                <td className="result" style={{ fontWeight: 600 }}>{fmtBRLSigned(r.result)}</td>
+                <td className="acum" style={{ fontWeight: 600 }}>{fmtBRLSigned(r.cumulative)}</td>
+              </tr>
+            ))}
+            <tr className="total">
+              <td>TOTAL</td>
+              <td className="mono">{fmtBRL(ytdRev)}</td>
+              <td className="mono">{fmtBRL(ytdExp)}</td>
+              <td className={`result mono ${ytdResult>=0?'':'negative'}`}>{fmtBRLSigned(ytdResult)}</td>
+              <td className={`acum mono ${rows[11]?.cumulative>=0?'':'negative'}`}>{fmtBRLSigned(rows[11]?.cumulative||0)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   MODULE 5 — RELATÓRIOS
+═══════════════════════════════════════════════════════ */
+function Relatorios({ expenses, revenue }) {
+  const catChartRef = useRef(null);
+  const revExpChartRef = useRef(null);
+  const resultChartRef = useRef(null);
+  const balanceChartRef = useRef(null);
+  const charts = useRef({});
+
+  useEffect(() => {
+    buildCharts();
+    return () => Object.values(charts.current).forEach(c => c?.destroy());
+  }, [expenses, revenue]);
+
+  function buildCharts() {
+    Object.values(charts.current).forEach(c => c?.destroy());
+    const now = new Date();
+    const currentMonth = monthISO(now);
+
+    // 1. Despesas por Categoria
+    if (catChartRef.current) {
+      const catTotals = {};
+      expenses.filter(e => e.due_date.startsWith(currentMonth)).forEach(e => {
+        catTotals[e.category] = (catTotals[e.category]||0) + e.amount;
+      });
+      charts.current.cat = new Chart(catChartRef.current, {
+        type: 'bar',
+        data: {
+          labels: Object.keys(catTotals),
+          datasets: [{ data: Object.values(catTotals), backgroundColor: '#19903a', borderRadius: 2 }]
+        },
+        options: {
+          indexAxis: 'y', responsive: true,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { callback: v => 'R$'+Math.round(v/1000)+'k', font: { family: 'JetBrains Mono', size: 10 } }, grid: { color: '#f0ece6' } },
+            y: { ticks: { font: { family: 'DM Sans', size: 11 } }, grid: { display: false } }
+          }
+        }
+      });
+    }
+
+    // 2. Receita vs Despesas 12 meses
+    const months12 = Array.from({length:12},(_,i) => {
+      const d = new Date(now.getFullYear(), now.getMonth()-11+i, 1);
+      return monthISO(d);
+    });
+    if (revExpChartRef.current) {
+      charts.current.revexp = new Chart(revExpChartRef.current, {
+        type: 'bar',
+        data: {
+          labels: months12.map(getMonthLabel),
+          datasets: [
+            { label: 'Receita', data: months12.map(m => revenue.filter(r=>r.month===m).reduce((a,b)=>a+b.amount,0)), backgroundColor: '#19903a', borderRadius: 2 },
+            { label: 'Despesas', data: months12.map(m => expenses.filter(e=>e.due_date.startsWith(m)).reduce((a,b)=>a+b.amount,0)), backgroundColor: '#000', borderRadius: 2 },
+          ]
+        },
+        options: { responsive: true, plugins: { legend: { labels: { font: { family: 'DM Sans', size: 12 } } } }, scales: { y: { ticks: { callback: v=>'R$'+Math.round(v/1000)+'k', font: { family: 'JetBrains Mono', size: 11 } }, grid: { color: '#f0ece6' } }, x: { ticks: { font: { family: 'DM Sans', size: 11 } }, grid: { display: false } } } }
+      });
+    }
+
+    // 3. Resultado Mensal line
+    if (resultChartRef.current) {
+      const results = months12.map(m => {
+        const rev = revenue.filter(r=>r.month===m).reduce((a,b)=>a+b.amount,0);
+        const exp = expenses.filter(e=>e.due_date.startsWith(m)).reduce((a,b)=>a+b.amount,0);
+        return rev - exp;
+      });
+      charts.current.result = new Chart(resultChartRef.current, {
+        type: 'line',
+        data: {
+          labels: months12.map(getMonthLabel),
+          datasets: [{
+            label: 'Resultado',
+            data: results,
+            borderColor: '#19903a',
+            backgroundColor: 'rgba(25,144,58,0.08)',
+            fill: true,
+            tension: 0.3,
+            pointBackgroundColor: results.map(v => v >= 0 ? '#19903a' : '#c0392b'),
+            pointRadius: 5,
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false } },
+          scales: {
+            y: { ticks: { callback: v=>'R$'+Math.round(v/1000)+'k', font: { family: 'JetBrains Mono', size: 11 } }, grid: { color: '#f0ece6' } },
+            x: { ticks: { font: { family: 'DM Sans', size: 11 } }, grid: { display: false } }
+          }
+        }
+      });
+    }
+
+    // 4. Balance evolution
+    if (balanceChartRef.current) {
+      let cum = 0;
+      const balances = months12.map(m => {
+        const rev = revenue.filter(r=>r.month===m).reduce((a,b)=>a+b.amount,0);
+        const exp = expenses.filter(e=>e.due_date.startsWith(m)).reduce((a,b)=>a+b.amount,0);
+        cum += rev - exp;
+        return cum;
+      });
+      charts.current.balance = new Chart(balanceChartRef.current, {
+        type: 'line',
+        data: {
+          labels: months12.map(getMonthLabel),
+          datasets: [{
+            label: 'Saldo em Caixa',
+            data: balances,
+            borderColor: '#19903a',
+            backgroundColor: 'rgba(25,144,58,0.1)',
+            fill: true,
+            tension: 0.3,
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false } },
+          scales: {
+            y: { ticks: { callback: v=>'R$'+Math.round(v/1000)+'k', font: { family: 'JetBrains Mono', size: 11 } }, grid: { color: '#f0ece6' } },
+            x: { ticks: { font: { family: 'DM Sans', size: 11 } }, grid: { display: false } }
+          }
+        }
+      });
+    }
+  }
+
+  // 5. Top suppliers
+  const supplierTotals = {};
+  expenses.filter(e => e.due_date.startsWith(new Date().getFullYear().toString())).forEach(e => {
+    supplierTotals[e.supplier_name] = (supplierTotals[e.supplier_name]||0) + e.amount;
+  });
+  const topSuppliers = Object.entries(supplierTotals).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  const topTotal = topSuppliers.reduce((a,b)=>a+b[1],0);
+
+  return (
+    <div className="page">
+      <div className="page-header">
+        <div className="page-title">Relatórios</div>
+        <div className="page-subtitle">Análise financeira · {new Date().getFullYear()}</div>
+      </div>
+
+      <div className="chart-card">
+        <div className="chart-title">Despesas por Categoria</div>
+        <div className="chart-sub">Mês atual</div>
+        <canvas ref={catChartRef} height={120} />
+      </div>
+
+      <div className="chart-card">
+        <div className="chart-title">Receita vs. Despesas</div>
+        <div className="chart-sub">Últimos 12 meses</div>
+        <canvas ref={revExpChartRef} height={80} />
+      </div>
+
+      <div className="chart-card">
+        <div className="chart-title">Resultado Mensal</div>
+        <div className="chart-sub">Receita − Despesas · 12 meses</div>
+        <canvas ref={resultChartRef} height={80} />
+      </div>
+
+      <div className="chart-card">
+        <div className="chart-title">Top Fornecedores por Gasto — YTD</div>
+        <div className="chart-sub">{new Date().getFullYear()}</div>
+        {topSuppliers.length === 0 ? <div style={{ color: 'var(--muted)', fontSize: 13 }}>Sem dados.</div> : (
+          <div>
+            {topSuppliers.map(([name, total]) => {
+              const pct = topTotal > 0 ? (total/topTotal*100).toFixed(1) : 0;
+              return (
+                <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                  <div style={{ width: 140, fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
+                  <div style={{ flex: 1, height: 8, background: '#f0ece6', borderRadius: 2, overflow: 'hidden' }}>
+                    <div style={{ width: pct+'%', height: '100%', background: 'var(--green)' }} />
+                  </div>
+                  <div className="mono" style={{ fontSize: 12, width: 90, textAlign: 'right' }}>{fmtBRL(total)}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', width: 40, textAlign: 'right' }}>{pct}%</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="chart-card">
+        <div className="chart-title">Evolução do Saldo em Caixa</div>
+        <div className="chart-sub">Últimos 12 meses</div>
+        <canvas ref={balanceChartRef} height={80} />
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   MODULE 6 — CONFIGURAÇÕES
+═══════════════════════════════════════════════════════ */
+function Configuracoes({ user, profile, expenses, suppliers, revenue, forecast, onRefresh, onLogout }) {
+  const [name, setName] = useState(profile?.name || '');
+  const [password, setPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [users, setUsers] = useState([]);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState('staff');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    sb.from('profiles').select('*').then(({ data }) => data && setUsers(data));
+  }, []);
+
+  async function saveName() {
+    setSaving(true);
+    await sb.from('profiles').update({ name }).eq('id', user.id);
+    toast('Nome atualizado!', 'success');
+    setSaving(false);
+    onRefresh();
+  }
+
+  async function savePassword() {
+    if (!newPassword || newPassword.length < 6) { toast('Senha deve ter ao menos 6 caracteres.', 'error'); return; }
+    setSaving(true);
+    const { error } = await sb.auth.updateUser({ password: newPassword });
+    if (error) toast('Erro: ' + error.message, 'error');
+    else { toast('Senha atualizada!', 'success'); setNewPassword(''); }
+    setSaving(false);
+  }
+
+  async function inviteUser() {
+    if (!inviteEmail) { toast('Informe o e-mail.', 'error'); return; }
+    setSaving(true);
+    const { data, error } = await sb.auth.admin?.inviteUserByEmail(inviteEmail);
+    if (error) toast('Invite via Supabase Dashboard: ' + error.message, 'info');
+    else toast('Convite enviado!', 'success');
+    setSaving(false);
+  }
+
+  async function changeRole(uid, role) {
+    await sb.from('profiles').update({ role }).eq('id', uid);
+    setUsers(p => p.map(u => u.id === uid ? { ...u, role } : u));
+    toast('Papel atualizado!', 'success');
+  }
+
+  function exportBackup() {
+    const backup = { expenses, suppliers, revenue, forecast, exportedAt: new Date().toISOString() };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download=`vg-backup-${todayISO()}.json`; a.click();
+    URL.revokeObjectURL(url);
+    toast('Backup exportado!', 'success');
+  }
+
+  async function importBackup(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const text = await file.text();
+    const data = JSON.parse(text);
+    if (data.expenses) await sb.from('expenses').upsert(data.expenses);
+    if (data.suppliers) await sb.from('suppliers').upsert(data.suppliers);
+    if (data.revenue) await sb.from('revenue').upsert(data.revenue);
+    toast('Dados importados com sucesso!', 'success');
+    onRefresh();
+  }
+
+  return (
+    <div className="page">
+      <div className="page-header">
+        <div className="page-title">Configurações</div>
+      </div>
+
+      {/* Conta */}
+      <div className="settings-section">
+        <div className="settings-section-header">Minha Conta</div>
+        <div className="settings-section-body">
+          <div className="form-grid">
+            <div className="form-group">
+              <label className="form-label">Nome</label>
+              <input className="form-control" value={name} onChange={e=>setName(e.target.value)} />
+            </div>
+            <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
+              <button className="btn btn-primary" onClick={saveName} disabled={saving}>Salvar Nome</button>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Nova Senha</label>
+              <input className="form-control" type="password" value={newPassword} onChange={e=>setNewPassword(e.target.value)} placeholder="Mínimo 6 caracteres" />
+            </div>
+            <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
+              <button className="btn btn-secondary" onClick={savePassword} disabled={saving}>Alterar Senha</button>
+            </div>
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <button className="btn btn-danger" onClick={onLogout}>Sair do Sistema</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Usuários */}
+      <div className="settings-section">
+        <div className="settings-section-header">Usuários</div>
+        <div className="settings-section-body">
+          <div className="table-wrap" style={{ marginBottom: 20 }}>
+            <table>
+              <thead>
+                <tr><th>Nome</th><th>ID</th><th>Papel</th><th>Ações</th></tr>
+              </thead>
+              <tbody>
+                {users.map(u => (
+                  <tr key={u.id}>
+                    <td style={{ fontWeight: 600 }}>{u.name}</td>
+                    <td style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>{u.id.slice(0,8)}...</td>
+                    <td>
+                      <select className="form-control" style={{ width: 'auto' }} value={u.role} onChange={e=>changeRole(u.id, e.target.value)}>
+                        <option value="owner">Owner</option>
+                        <option value="staff">Staff</option>
+                      </select>
+                    </td>
+                    <td style={{ fontSize: 12, color: 'var(--muted)' }}>{u.id === user.id ? '(você)' : ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 12 }}>Para convidar usuários, use o Supabase Dashboard → Authentication → Users → Add User, depois insira o perfil no SQL Editor.</div>
+        </div>
+      </div>
+
+      {/* Backup */}
+      <div className="settings-section">
+        <div className="settings-section-header">Backup & Dados</div>
+        <div className="settings-section-body">
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button className="btn btn-primary" onClick={exportBackup}>⬇ Exportar Backup JSON</button>
+            <div>
+              <label className="btn btn-secondary" style={{ cursor: 'pointer' }}>
+                ⬆ Importar Backup
+                <input type="file" accept=".json" style={{ display: 'none' }} onChange={importBackup} />
+              </label>
+            </div>
+          </div>
+          <div style={{ marginTop: 12, fontSize: 12, color: 'var(--muted)' }}>
+            O backup inclui todas as despesas, receitas, fornecedores e previsões.
+            A importação usa upsert — não remove dados existentes.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   MAIN APP
+═══════════════════════════════════════════════════════ */
+function App() {
+  const [session, setSession] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState('dashboard');
+  const [online, setOnline] = useState(navigator.onLine);
+  const [lastSync, setLastSync] = useState(null);
+
+  // Data state
+  const [expenses, setExpenses] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
+  const [revenue, setRevenue] = useState([]);
+  const [forecast, setForecast] = useState([]);
+
+  // Modal state for dashboard quick pay
+  const [quickModal, setQuickModal] = useState(null);
+
+  const isOwner = profile?.role === 'owner';
+  const overdueCount = expenses.filter(e => isOverdue(e.due_date, e.status)).length;
+
+  // Auth listener
+  useEffect(() => {
+    sb.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session) loadAll(session);
+      else setLoading(false);
+    });
+    const { data: { subscription } } = sb.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session) loadAll(session);
+      else { setProfile(null); setLoading(false); }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Online/offline
+  useEffect(() => {
+    const goOnline = async () => {
+      setOnline(true);
+      await processPendingSync();
+      toast('Sincronizado com sucesso', 'success');
+      loadAll(session);
+    };
+    const goOffline = () => setOnline(false);
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+    return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline); };
+  }, [session]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === 'n' || e.key === 'N') {
+        if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+        setQuickModal('expense');
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  async function loadAll(s) {
+    if (!s) return;
+    setLoading(true);
+    try {
+      const [expRes, supRes, revRes, fcRes, profRes] = await Promise.all([
+        sb.from('expenses').select('*').order('due_date', { ascending: false }),
+        sb.from('suppliers').select('*').order('name'),
+        sb.from('revenue').select('*'),
+        sb.from('forecast').select('*'),
+        sb.from('profiles').select('*').eq('id', s.user.id).single(),
+      ]);
+
+      if (expRes.data) { setExpenses(expRes.data); await idbSet('expenses','all',expRes.data); }
+      else { const cached = await idbGet('expenses','all'); if(cached) setExpenses(cached); }
+
+      if (supRes.data) {
+        let sups = supRes.data;
+        // Seed if empty
+        if (sups.length === 0) {
+          const { data: seeded } = await sb.from('suppliers').insert(DEFAULT_SUPPLIERS).select();
+          sups = seeded || [];
+        }
+        setSuppliers(sups);
+        await idbSet('suppliers','all',sups);
+      } else { const cached = await idbGet('suppliers','all'); if(cached) setSuppliers(cached); }
+
+      if (revRes.data) { setRevenue(revRes.data); await idbSet('revenue','all',revRes.data); }
+      else { const cached = await idbGet('revenue','all'); if(cached) setRevenue(cached); }
+
+      if (fcRes.data) { setForecast(fcRes.data); }
+      if (profRes.data) setProfile(profRes.data);
+      else {
+        // Create profile if missing
+        await sb.from('profiles').insert({ id: s.user.id, name: s.user.email.split('@')[0], role: 'owner' });
+        setProfile({ id: s.user.id, name: s.user.email.split('@')[0], role: 'owner' });
+      }
+
+      setLastSync(new Date());
+    } catch (err) {
+      console.error(err);
+      // Load from cache
+      const [ce, cs, cr] = await Promise.all([idbGet('expenses','all'), idbGet('suppliers','all'), idbGet('revenue','all')]);
+      if (ce) setExpenses(ce);
+      if (cs) setSuppliers(cs);
+      if (cr) setRevenue(cr);
+    }
+    setLoading(false);
+  }
+
+  async function handleLogin(s) {
+    setSession(s);
+    await loadAll(s);
+  }
+
+  async function handleLogout() {
+    await sb.auth.signOut();
+    setSession(null); setProfile(null); setExpenses([]); setSuppliers([]); setRevenue([]);
+  }
+
+  async function handleQuickPay(exp) {
+    await sb.from('expenses').update({ status: 'pago', paid_date: todayISO() }).eq('id', exp.id);
+    toast('Pago com sucesso!', 'success');
+    setQuickModal(null);
+    loadAll(session);
+  }
+
+  function showModal(type, data) {
+    setQuickModal({ type, data });
+  }
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--offwhite)', flexDirection: 'column', gap: 16 }}>
+        <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 900 }}>VITTO &amp; GIULIO</div>
+        <div className="skeleton" style={{ width: 200, height: 8 }} />
+        <div style={{ fontSize: 12, color: 'var(--muted)' }}>Carregando sistema...</div>
+      </div>
+    );
+  }
+
+  if (!session) return <AuthScreen onLogin={handleLogin} />;
+
+  const navItems = [
+    { id: 'dashboard', label: 'Dashboard', icon: '◈' },
+    { id: 'contas', label: 'Contas a Pagar', icon: '◎', badge: overdueCount > 0 ? overdueCount : null },
+    { id: 'fornecedores', label: 'Fornecedores', icon: '◉' },
+    { id: 'fluxo', label: 'Fluxo de Caixa', icon: '◆' },
+    ...(isOwner ? [{ id: 'relatorios', label: 'Relatórios', icon: '◇' }] : []),
+    ...(isOwner ? [{ id: 'config', label: 'Configurações', icon: '⊙' }] : []),
+  ];
+
+  return (
+    <div className="app">
+      {/* SIDEBAR */}
+      <div className="sidebar">
+        <div className="sidebar-brand">
+          <div className="sidebar-brand-name">VITTO &amp; GIULIO</div>
+          <div className="sidebar-brand-rule" />
+          <div className="sidebar-brand-sub">Gestão Financeira</div>
+        </div>
+        <nav className="sidebar-nav">
+          {navItems.map(item => (
+            <div key={item.id} className={`nav-item ${page === item.id ? 'active' : ''}`} onClick={() => setPage(item.id)}>
+              <span className="nav-icon">{item.icon}</span>
+              <span>{item.label}</span>
+              {item.badge && <span className="nav-badge">{item.badge}</span>}
+            </div>
+          ))}
+        </nav>
+        <div className="sidebar-user">
+          <div className="user-avatar">{(profile?.name||'?')[0].toUpperCase()}</div>
+          <div className="user-info">
+            <div className="user-name">{profile?.name || session.user.email}</div>
+            <div className="user-role">{profile?.role || 'staff'}</div>
+          </div>
+          <div className="sidebar-logout" onClick={handleLogout} title="Sair">⏻</div>
+        </div>
+      </div>
+
+      {/* CONTENT */}
+      <div className="content">
+        {!online && (
+          <div className="offline-banner">
+            ⚡ Modo offline — exibindo dados do último acesso. Alterações serão sincronizadas ao reconectar.
+          </div>
+        )}
+
+        {page === 'dashboard' && (
+          <Dashboard
+            expenses={expenses}
+            revenue={revenue}
+            showModal={showModal}
+          />
+        )}
+        {page === 'contas' && (
+          <ContasPagar
+            expenses={expenses}
+            suppliers={suppliers}
+            revenue={revenue}
+            onRefresh={() => loadAll(session)}
+            isOwner={isOwner}
+          />
+        )}
+        {page === 'fornecedores' && (
+          <Fornecedores
+            suppliers={suppliers}
+            expenses={expenses}
+            onRefresh={() => loadAll(session)}
+            isOwner={isOwner}
+          />
+        )}
+        {page === 'fluxo' && (
+          <FluxoDeCaixa
+            expenses={expenses}
+            revenue={revenue}
+            onRefresh={() => loadAll(session)}
+          />
+        )}
+        {page === 'relatorios' && isOwner && (
+          <Relatorios expenses={expenses} revenue={revenue} />
+        )}
+        {page === 'config' && isOwner && (
+          <Configuracoes
+            user={session.user}
+            profile={profile}
+            expenses={expenses}
+            suppliers={suppliers}
+            revenue={revenue}
+            forecast={forecast}
+            onRefresh={() => loadAll(session)}
+            onLogout={handleLogout}
+          />
+        )}
+      </div>
+
+      {/* Quick pay modal from dashboard */}
+      {quickModal?.type === 'pay' && (
+        <div className="modal-overlay" onClick={() => setQuickModal(null)}>
+          <div className="confirm-dialog" onClick={e=>e.stopPropagation()}>
+            <div className="confirm-title">Confirmar Pagamento</div>
+            <div className="confirm-msg">
+              Marcar como pago: <strong>{quickModal.data.supplier_name}</strong><br/>
+              Valor: <strong className="mono">{fmtBRL(quickModal.data.amount)}</strong>
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button className="btn btn-secondary" onClick={() => setQuickModal(null)}>Cancelar</button>
+              <button className="btn btn-primary" onClick={() => handleQuickPay(quickModal.data)}>✓ Confirmar Pagamento</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Quick new expense from FAB */}
+      {quickModal?.type === 'expense' && (
+        <ExpenseModal
+          expense={null}
+          suppliers={suppliers}
+          onSave={async (payload) => {
+            const user = (await sb.auth.getUser()).data.user;
+            const { error } = await sb.from('expenses').insert({ ...payload, created_by: user.id });
+            if (error) { toast('Erro: ' + error.message, 'error'); return; }
+            toast('Despesa salva!', 'success');
+            setQuickModal(null);
+            loadAll(session);
+          }}
+          onClose={() => setQuickModal(null)}
+        />
+      )}
+
+      <ToastContainer />
+
+      {lastSync && (
+        <div className="sync-indicator">
+          sync {lastSync.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+
+<!--
+═══════════════════════════════════════════════════════════════
+  PASSO A PASSO — SETUP INICIAL
+═══════════════════════════════════════════════════════════════
+
+1. Acesse supabase.com e crie uma conta gratuita.
+
+2. Crie um novo projeto:
+   - Nome: vitto-giulio-finance
+   - Região: South America (São Paulo)
+   - Guarde a senha do banco
+
+3. Aguarde inicializar (~2 minutos).
+
+4. Vá em SQL Editor → New Query → cole e execute o SQL abaixo:
+
+─────────────────────────────────────────────────────────────
+  create table profiles (
+    id uuid references auth.users primary key,
+    name text not null,
+    role text not null check (role in ('owner', 'staff')),
+    created_at timestamptz default now()
+  );
+
+  create table suppliers (
+    id uuid primary key default gen_random_uuid(),
+    name text not null,
+    category text not null,
+    contact text,
+    default_payment_method text,
+    notes text,
+    created_at timestamptz default now()
+  );
+
+  create table expenses (
+    id uuid primary key default gen_random_uuid(),
+    supplier_id uuid references suppliers(id) on delete set null,
+    supplier_name text not null,
+    category text not null,
+    expense_type text,
+    amount numeric(12,2) not null,
+    due_date date not null,
+    payment_method text,
+    status text not null default 'pendente'
+      check (status in ('pendente', 'pago')),
+    paid_date date,
+    recurring boolean default false,
+    frequency text check (frequency in ('semanal','mensal','anual')),
+    week_range text,
+    notes text,
+    created_by uuid references auth.users(id),
+    created_at timestamptz default now()
+  );
+
+  create table revenue (
+    id uuid primary key default gen_random_uuid(),
+    month text not null,
+    amount numeric(12,2) not null,
+    notes text,
+    created_by uuid references auth.users(id),
+    created_at timestamptz default now()
+  );
+
+  create table forecast (
+    id uuid primary key default gen_random_uuid(),
+    month text not null,
+    projected_revenue numeric(12,2),
+    notes text,
+    updated_at timestamptz default now()
+  );
+
+  alter table profiles enable row level security;
+  alter table suppliers enable row level security;
+  alter table expenses enable row level security;
+  alter table revenue enable row level security;
+  alter table forecast enable row level security;
+
+  create policy "auth_all" on suppliers
+    for all using (auth.role() = 'authenticated');
+  create policy "auth_all" on expenses
+    for all using (auth.role() = 'authenticated');
+  create policy "auth_all" on revenue
+    for all using (auth.role() = 'authenticated');
+  create policy "auth_all" on forecast
+    for all using (auth.role() = 'authenticated');
+  create policy "own_profile" on profiles
+    for all using (auth.uid() = id);
+─────────────────────────────────────────────────────────────
+
+5. Vá em Project Settings → API → copie:
+   - Project URL  → substitua YOUR_SUPABASE_URL no código
+   - anon public  → substitua YOUR_SUPABASE_ANON_KEY
+
+6. Vá em Authentication → Providers → Email →
+   desabilite "Confirm email"
+
+7. Crie seu usuário:
+   Authentication → Users → Add User
+   (anote o UUID gerado)
+
+8. Crie o perfil de owner no SQL Editor:
+   insert into profiles (id, name, role)
+   values ('[SEU-UUID-AQUI]', 'Vic', 'owner');
+
+9. Abra o arquivo HTML no browser e faça login.
+   Os 15 fornecedores padrão serão inseridos automaticamente
+   na primeira carga.
+
+═══════════════════════════════════════════════════════════════
+-->
+</body>
+</html>
