@@ -864,24 +864,55 @@ function AuthScreen({ onLogin }) {
    EXPENSE MODAL
 ═══════════════════════════════════════════════════════ */
 function ExpenseModal({ expense, suppliers, onSave, onClose }) {
-  const [form, setForm] = useState({
-    supplier_name: expense?.supplier_name || '',
-    supplier_id: expense?.supplier_id || '',
-    category: expense?.category || '',
-    expense_type: expense?.expense_type || '',
-    amount: expense ? expense.amount.toString().replace('.',',') : '',
-    due_date: expense?.due_date || todayISO(),
-    payment_method: expense?.payment_method || '',
-    payment_details: expense?.payment_details || '',
-    status: expense?.status || 'pendente',
-    paid_date: expense?.paid_date || '',
-    recurring: expense?.recurring || false,
-    frequency: expense?.frequency || '',
-    week_range: expense?.week_range || '',
-    notes: expense?.notes || '',
-  });
+  const DRAFT_KEY = 'vg_expense_draft';
+
+  const emptyForm = {
+    supplier_name: '', supplier_id: '', category: '',
+    expense_type: '', amount: '', due_date: todayISO(),
+    payment_method: '', payment_details: '', status: 'pendente',
+    paid_date: '', recurring: false, frequency: '',
+    week_range: '', notes: '',
+  };
+
+  function getInitial() {
+    if (expense) {
+      return {
+        supplier_name: expense.supplier_name || '',
+        supplier_id: expense.supplier_id || '',
+        category: expense.category || '',
+        expense_type: expense.expense_type || '',
+        amount: expense.amount.toString().replace('.',','),
+        due_date: expense.due_date || todayISO(),
+        payment_method: expense.payment_method || '',
+        payment_details: expense.payment_details || '',
+        status: expense.status || 'pendente',
+        paid_date: expense.paid_date || '',
+        recurring: expense.recurring || false,
+        frequency: expense.frequency || '',
+        week_range: expense.week_range || '',
+        notes: expense.notes || '',
+      };
+    }
+    try {
+      const saved = sessionStorage.getItem(DRAFT_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') return { ...emptyForm, ...parsed };
+      }
+    } catch {}
+    return emptyForm;
+  }
+
+  const [form, setForm] = useState(getInitial);
   const [saving, setSaving] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
+
+  // Auto-save draft on every keystroke (new expenses only)
+  useEffect(() => {
+    if (!expense) {
+      try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(form)); } catch {}
+    }
+  }, [form]);
 
   const filtered = suppliers.filter(s =>
     form.supplier_name && s.name.toLowerCase().includes(form.supplier_name.toLowerCase())
@@ -899,21 +930,19 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
       amount: parseBRLInput(form.amount),
       paid_date: form.status === 'pago' ? (form.paid_date || todayISO()) : null,
     };
-    try { sessionStorage.removeItem('vg_expense_draft'); } catch {}
+    try { sessionStorage.removeItem(DRAFT_KEY); } catch {}
     await onSave(payload);
     setSaving(false);
   }
 
   useEffect(() => {
-    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    function onKey(e) { if (e.key === 'Escape') handleClose(); }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   function handleClose() {
-    if (!expense) {
-      try { sessionStorage.removeItem('vg_expense_draft'); } catch {}
-    }
+    try { sessionStorage.removeItem(DRAFT_KEY); sessionStorage.removeItem('vg_modal_state'); } catch {}
     onClose();
   }
 
