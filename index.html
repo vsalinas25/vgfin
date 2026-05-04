@@ -929,6 +929,12 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
       ...form,
       amount: parseBRLInput(form.amount),
       paid_date: form.status === 'pago' ? (form.paid_date || todayISO()) : null,
+      frequency: form.recurring && form.frequency ? form.frequency : null,
+      supplier_id: form.supplier_id || null,
+      payment_method: form.payment_method || null,
+      expense_type: form.expense_type || null,
+      week_range: form.week_range || null,
+      notes: form.notes || null,
     };
     try { sessionStorage.removeItem(DRAFT_KEY); } catch {}
     await onSave(payload);
