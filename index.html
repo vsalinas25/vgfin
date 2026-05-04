@@ -869,7 +869,7 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
   const emptyForm = {
     supplier_name: '', supplier_id: '', category: '',
     expense_type: '', amount: '', due_date: todayISO(),
-    payment_method: '', payment_details: '', status: 'pendente',
+    payment_method: '', status: 'pendente',
     paid_date: '', recurring: false, frequency: '',
     week_range: '', notes: '',
   };
@@ -884,7 +884,6 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
         amount: expense.amount.toString().replace('.',','),
         due_date: expense.due_date || todayISO(),
         payment_method: expense.payment_method || '',
-        payment_details: expense.payment_details || '',
         status: expense.status || 'pendente',
         paid_date: expense.paid_date || '',
         recurring: expense.recurring || false,
@@ -925,8 +924,9 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
       toast('Preencha os campos obrigatórios.', 'error'); return;
     }
     setSaving(true);
+    const { payment_details: _pd, ...formClean } = form;
     const payload = {
-      ...form,
+      ...formClean,
       amount: parseBRLInput(form.amount),
       paid_date: form.status === 'pago' ? (form.paid_date || todayISO()) : null,
       frequency: form.recurring && form.frequency ? form.frequency : null,
@@ -1013,25 +1013,7 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
               </select>
             </div>
 
-            <div className="form-group full">
-              <label className="form-label">
-                {form.payment_method === 'PIX' ? 'Chave PIX' :
-                 form.payment_method === 'Boleto' ? 'Código de Barras / Linha Digitável' :
-                 'Dados de Pagamento'}
-              </label>
-              <textarea
-                className="form-control mono"
-                rows={3}
-                value={form.payment_details}
-                onChange={e => set('payment_details', e.target.value)}
-                placeholder={
-                  form.payment_method === 'PIX' ? 'Cole a chave PIX (CPF, CNPJ, e-mail, telefone ou chave aleatória)...' :
-                  form.payment_method === 'Boleto' ? 'Cole o código de barras ou linha digitável...' :
-                  'Cole os dados de pagamento aqui...'
-                }
-                style={{ resize: 'vertical', fontSize: 12, fontFamily: 'var(--font-mono)', letterSpacing: '0.02em', minHeight: 72 }}
-              />
-            </div>
+
 
             <div className="form-group">
               <label className="form-label">Status</label>
@@ -1063,8 +1045,18 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
             </div>
 
             <div className="form-group full">
-              <label className="form-label">Observações</label>
-              <textarea className="form-control" rows={2} value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="Notas adicionais..." style={{ resize: 'vertical' }} />
+              <label className="form-label">
+                {form.payment_method === 'Pix' ? 'Chave PIX / QR Code' :
+                 form.payment_method === 'Boleto' ? 'Código de Barras / Linha Digitável' :
+                 'Observações'}
+              </label>
+              <textarea className="form-control" rows={2} value={form.notes} onChange={e => set('notes', e.target.value)}
+                placeholder={
+                  form.payment_method === 'Pix' ? 'Cole a chave PIX aqui...' :
+                  form.payment_method === 'Boleto' ? 'Cole o código de barras aqui...' :
+                  'Notas adicionais...'
+                }
+                style={{ resize: 'vertical', fontFamily: form.payment_method === 'Pix' || form.payment_method === 'Boleto' ? 'var(--font-mono)' : 'inherit', fontSize: 12 }} />
             </div>
           </div>
         </div>
@@ -1218,7 +1210,7 @@ function Dashboard({ expenses, revenue, showModal }) {
 /* ═══════════════════════════════════════════════════════
    MODULE 2 — CONTAS A PAGAR
 ═══════════════════════════════════════════════════════ */
-function ContasPagar({ expenses, suppliers, revenue, onRefresh, isOwner }) {
+function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isOwner }) {
   const [filter, setFilter] = useState({ status: 'todos', category: '', search: '', from: '', to: '' });
   const [modal, setModal] = useState(() => {
     try {
@@ -1271,11 +1263,13 @@ function ContasPagar({ expenses, suppliers, revenue, onRefresh, isOwner }) {
   async function handleSave(payload) {
     const user = (await sb.auth.getUser()).data.user;
     if (modal.expense) {
-      const { error } = await sb.from('expenses').update({ ...payload, created_by: user.id }).eq('id', modal.expense.id);
+      const { data, error } = await sb.from('expenses').update({ ...payload, created_by: user.id }).eq('id', modal.expense.id).select().single();
       if (error) { toast('Erro ao salvar: ' + error.message, 'error'); return; }
+      if (data) setExpenses(prev => prev.map(e => e.id === data.id ? data : e));
     } else {
-      const { error } = await sb.from('expenses').insert({ ...payload, created_by: user.id });
+      const { data, error } = await sb.from('expenses').insert({ ...payload, created_by: user.id }).select().single();
       if (error) { toast('Erro ao salvar: ' + error.message, 'error'); return; }
+      if (data) setExpenses(prev => [data, ...prev]);
     }
     toast('Despesa salva com sucesso!', 'success');
     try { sessionStorage.removeItem('vg_modal_state'); sessionStorage.removeItem('vg_expense_draft'); } catch {}
@@ -1284,22 +1278,38 @@ function ContasPagar({ expenses, suppliers, revenue, onRefresh, isOwner }) {
   }
 
   async function markPaid(exp) {
+    // Optimistic update first
+    setExpenses(prev => prev.map(e => e.id === exp.id ? { ...e, status: 'pago', paid_date: todayISO() } : e));
     const { error } = await sb.from('expenses').update({ status: 'pago', paid_date: todayISO() }).eq('id', exp.id);
-    if (error) { toast('Erro: ' + error.message, 'error'); return; }
+    if (error) {
+      toast('Erro: ' + error.message, 'error');
+      onRefresh(); // revert
+      return;
+    }
     toast('Marcado como pago!', 'success');
     onRefresh();
   }
 
   async function markPending(exp) {
+    setExpenses(prev => prev.map(e => e.id === exp.id ? { ...e, status: 'pendente', paid_date: null } : e));
     const { error } = await sb.from('expenses').update({ status: 'pendente', paid_date: null }).eq('id', exp.id);
-    if (error) { toast('Erro: ' + error.message, 'error'); return; }
+    if (error) {
+      toast('Erro: ' + error.message, 'error');
+      onRefresh();
+      return;
+    }
     toast('Reaberto como pendente.', 'info');
     onRefresh();
   }
 
   async function handleDelete(id) {
+    setExpenses(prev => prev.filter(e => e.id !== id));
     const { error } = await sb.from('expenses').delete().eq('id', id);
-    if (error) { toast('Erro: ' + error.message, 'error'); return; }
+    if (error) {
+      toast('Erro: ' + error.message, 'error');
+      onRefresh();
+      return;
+    }
     toast('Despesa excluída.', 'info');
     setConfirm(null);
     onRefresh();
@@ -1375,11 +1385,7 @@ function ContasPagar({ expenses, suppliers, revenue, onRefresh, isOwner }) {
                   <td style={{ fontSize: 12, color: ov ? 'var(--danger)' : 'inherit' }}>{fmtDate(e.due_date)}</td>
                   <td style={{ fontSize: 12 }}>
                     <div>{e.payment_method || '—'}</div>
-                    {e.payment_details && (
-                      <div title={e.payment_details} style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'var(--font-mono)', marginTop: 2, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'help' }}>
-                        {e.payment_details}
-                      </div>
-                    )}
+
                   </td>
                   <td>
                     {ov && e.status === 'pendente' ? <span className="badge badge-overdue">Vencido</span>
@@ -2200,6 +2206,9 @@ function App() {
   const [revenue, setRevenue] = useState([]);
   const [forecast, setForecast] = useState([]);
 
+  // Keep session in a ref so callbacks always have the latest value
+  const sessionRef = useRef(null);
+
   // Modal state for dashboard quick pay
   const [quickModal, setQuickModal] = useState(null);
 
@@ -2215,6 +2224,7 @@ function App() {
     });
     const { data: { subscription } } = sb.auth.onAuthStateChange((_event, session) => {
       setSession(session);
+      sessionRef.current = session;
       if (session) loadAll(session);
       else { setProfile(null); setLoading(false); }
     });
@@ -2247,9 +2257,9 @@ function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  async function loadAll(s) {
+  async function loadAll(s, silent = false) {
     if (!s) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const [expRes, supRes, revRes, fcRes, profRes] = await Promise.all([
         sb.from('expenses').select('*').order('due_date', { ascending: false }),
@@ -2264,7 +2274,6 @@ function App() {
 
       if (supRes.data) {
         let sups = supRes.data;
-        // Seed if empty
         if (sups.length === 0) {
           const { data: seeded } = await sb.from('suppliers').insert(DEFAULT_SUPPLIERS).select();
           sups = seeded || [];
@@ -2279,7 +2288,6 @@ function App() {
       if (fcRes.data) { setForecast(fcRes.data); }
       if (profRes.data) setProfile(profRes.data);
       else {
-        // Create profile if missing
         await sb.from('profiles').insert({ id: s.user.id, name: s.user.email.split('@')[0], role: 'owner' });
         setProfile({ id: s.user.id, name: s.user.email.split('@')[0], role: 'owner' });
       }
@@ -2287,17 +2295,17 @@ function App() {
       setLastSync(new Date());
     } catch (err) {
       console.error(err);
-      // Load from cache
       const [ce, cs, cr] = await Promise.all([idbGet('expenses','all'), idbGet('suppliers','all'), idbGet('revenue','all')]);
       if (ce) setExpenses(ce);
       if (cs) setSuppliers(cs);
       if (cr) setRevenue(cr);
     }
-    setLoading(false);
+    if (!silent) setLoading(false);
   }
 
   async function handleLogin(s) {
     setSession(s);
+    sessionRef.current = s;
     await loadAll(s);
   }
 
@@ -2384,9 +2392,10 @@ function App() {
         {page === 'contas' && (
           <ContasPagar
             expenses={expenses}
+            setExpenses={setExpenses}
             suppliers={suppliers}
             revenue={revenue}
-            onRefresh={() => loadAll(session)}
+            onRefresh={() => loadAll(sessionRef.current, true)}
             isOwner={isOwner}
           />
         )}
@@ -2394,7 +2403,7 @@ function App() {
           <Fornecedores
             suppliers={suppliers}
             expenses={expenses}
-            onRefresh={() => loadAll(session)}
+            onRefresh={() => loadAll(sessionRef.current, true)}
             isOwner={isOwner}
           />
         )}
@@ -2402,7 +2411,7 @@ function App() {
           <FluxoDeCaixa
             expenses={expenses}
             revenue={revenue}
-            onRefresh={() => loadAll(session)}
+            onRefresh={() => loadAll(sessionRef.current, true)}
           />
         )}
         {page === 'relatorios' && isOwner && (
@@ -2416,7 +2425,7 @@ function App() {
             suppliers={suppliers}
             revenue={revenue}
             forecast={forecast}
-            onRefresh={() => loadAll(session)}
+            onRefresh={() => loadAll(sessionRef.current, true)}
             onLogout={handleLogout}
           />
         )}
