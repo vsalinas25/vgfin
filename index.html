@@ -899,6 +899,7 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
       amount: parseBRLInput(form.amount),
       paid_date: form.status === 'pago' ? (form.paid_date || todayISO()) : null,
     };
+    try { sessionStorage.removeItem('vg_expense_draft'); } catch {}
     await onSave(payload);
     setSaving(false);
   }
@@ -909,12 +910,19 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  function handleClose() {
+    if (!expense) {
+      try { sessionStorage.removeItem('vg_expense_draft'); } catch {}
+    }
+    onClose();
+  }
+
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" onClick={handleClose}>
       <div className="modal-box" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title">{expense ? 'Editar Despesa' : 'Nova Despesa'}</div>
-          <button className="modal-close" onClick={onClose}>✕</button>
+          <button className="modal-close" onClick={handleClose}>✕</button>
         </div>
         <div className="modal-body">
           <div className="form-grid">
@@ -1026,7 +1034,7 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
           </div>
         </div>
         <div className="modal-footer">
-          <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+          <button className="btn btn-secondary" onClick={handleClose}>Cancelar</button>
           <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
             {saving ? 'Salvando...' : 'Salvar Despesa'}
           </button>
