@@ -706,7 +706,12 @@ function monthISO(d = new Date()) {
 }
 function parseBRLInput(s) {
   if (!s) return 0;
-  return parseFloat(s.toString().replace(/\./g,'').replace(',','.')) || 0;
+  const cleaned = s.toString()
+    .replace(/R\$\s*/g, '')   // remove R$ prefix
+    .replace(/\s/g, '')        // remove spaces
+    .replace(/\./g, '')        // remove thousand separators
+    .replace(',', '.');         // decimal comma to dot
+  return parseFloat(cleaned) || 0;
 }
 function isOverdue(dateStr, status) {
   if (status === 'pago') return false;
@@ -896,7 +901,13 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
       const saved = sessionStorage.getItem(DRAFT_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object') return { ...emptyForm, ...parsed };
+        if (parsed && typeof parsed === 'object') {
+        // Clean amount field in case it was saved with R$ prefix
+        if (parsed.amount) {
+          parsed.amount = parsed.amount.toString().replace(/R\$\s*/g, '').trim();
+        }
+        return { ...emptyForm, ...parsed };
+      }
       }
     } catch {}
     return emptyForm;
@@ -1074,11 +1085,100 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
 /* ═══════════════════════════════════════════════════════
    MODULE 1 — DASHBOARD
 ═══════════════════════════════════════════════════════ */
-function Dashboard({ expenses, revenue, showModal }) {
+
+/* ═══════════════════════════════════════════════════════
+   REVENUE MODAL
+═══════════════════════════════════════════════════════ */
+function RevenueModal({ revenue, onSave, onClose }) {
+  const now = new Date();
+  const [form, setForm] = useState({
+    month: revenue?.month || monthISO(now),
+    amount: revenue ? revenue.amount.toString().replace('.',',') : '',
+    notes: revenue?.notes || '',
+  });
+  const [saving, setSaving] = useState(false);
+
+  function set(k,v) { setForm(p=>({...p,[k]:v})); }
+
+  async function handleSave() {
+    if (!form.month || !form.amount) { toast('Preencha mês e valor.', 'error'); return; }
+    setSaving(true);
+    await onSave({ ...form, amount: parseBRLInput(form.amount), notes: form.notes || null });
+    setSaving(false);
+  }
+
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Build month options: last 12 + next 3
+  const monthOptions = [];
+  for (let i = -11; i <= 3; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    monthOptions.push(monthISO(d));
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">{revenue ? 'Editar Receita' : 'Nova Receita'}</div>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          <div className="form-grid">
+            <div className="form-group">
+              <label className="form-label">Mês *</label>
+              <select className="form-control" value={form.month} onChange={e => set('month', e.target.value)}>
+                {monthOptions.map(m => (
+                  <option key={m} value={m}>{getFullMonthLabel(m)}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Valor (R$) *</label>
+              <input className="form-control mono" value={form.amount} onChange={e => set('amount', e.target.value)} placeholder="0,00" autoFocus />
+            </div>
+            <div className="form-group full">
+              <label className="form-label">Observações</label>
+              <textarea className="form-control" rows={2} value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="Ex: Faturamento semana 1 a 4..." style={{ resize: 'vertical' }} />
+            </div>
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? 'Salvando...' : 'Salvar Receita'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Dashboard({ expenses, revenue, showModal, onRefresh, session }) {
   const now = new Date();
   const currentMonth = monthISO(now);
   const chartRef = useRef(null);
   const chartInstance = useRef(null);
+  const [revenueModal, setRevenueModal] = useState(false);
+
+  async function handleSaveRevenue(payload) {
+    const user = (await sb.auth.getUser()).data.user;
+    const existing = revenue.find(r => r.month === payload.month);
+    if (existing) {
+      const { error } = await sb.from('revenue').update({ amount: payload.amount, notes: payload.notes, created_by: user.id }).eq('id', existing.id);
+      if (error) { toast('Erro: ' + error.message, 'error'); return; }
+    } else {
+      const { error } = await sb.from('revenue').insert({ ...payload, created_by: user.id });
+      if (error) { toast('Erro: ' + error.message, 'error'); return; }
+    }
+    toast('Receita salva!', 'success');
+    setRevenueModal(false);
+    onRefresh();
+  }
 
   const monthExpenses = expenses.filter(e => e.due_date.startsWith(currentMonth));
   const monthRevenue = revenue.filter(r => r.month === currentMonth).reduce((a, b) => a + b.amount, 0);
@@ -1137,9 +1237,12 @@ function Dashboard({ expenses, revenue, showModal }) {
 
   return (
     <div className="page">
-      <div className="page-header">
-        <div className="page-title">Dashboard</div>
-        <div className="page-subtitle">{getFullMonthLabel(currentMonth)}</div>
+      <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+        <div>
+          <div className="page-title">Dashboard</div>
+          <div className="page-subtitle">{getFullMonthLabel(currentMonth)}</div>
+        </div>
+        <button className="btn btn-primary" onClick={() => setRevenueModal(true)}>+ Nova Receita</button>
       </div>
 
       <div className="metrics-grid">
@@ -1201,6 +1304,13 @@ function Dashboard({ expenses, revenue, showModal }) {
           </div>
         ))}
       </div>
+
+      {revenueModal && (
+        <RevenueModal
+          onSave={handleSaveRevenue}
+          onClose={() => setRevenueModal(false)}
+        />
+      )}
 
       <button className="fab" onClick={() => showModal('expense')} title="Nova Despesa (N)">+</button>
     </div>
@@ -1704,6 +1814,22 @@ function FluxoDeCaixa({ expenses, revenue, onRefresh }) {
   const [year, setYear] = useState(new Date().getFullYear());
   const [editingRev, setEditingRev] = useState({});
   const [saving, setSaving] = useState(false);
+  const [revenueModal, setRevenueModal] = useState(false);
+
+  async function handleSaveRevenue(payload) {
+    const user = (await sb.auth.getUser()).data.user;
+    const existing = revenue.find(r => r.month === payload.month);
+    if (existing) {
+      const { error } = await sb.from('revenue').update({ amount: payload.amount, notes: payload.notes, created_by: user.id }).eq('id', existing.id);
+      if (error) { toast('Erro: ' + error.message, 'error'); return; }
+    } else {
+      const { error } = await sb.from('revenue').insert({ ...payload, created_by: user.id });
+      if (error) { toast('Erro: ' + error.message, 'error'); return; }
+    }
+    toast('Receita salva!', 'success');
+    setRevenueModal(false);
+    onRefresh();
+  }
 
   const months = Array.from({ length: 12 }, (_, i) => {
     const m = String(i+1).padStart(2,'0');
@@ -1771,6 +1897,7 @@ function FluxoDeCaixa({ expenses, revenue, onRefresh }) {
           <button className="btn btn-ghost btn-sm" onClick={() => setYear(y=>y-1)}>◀</button>
           <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{year}</span>
           <button className="btn btn-ghost btn-sm" onClick={() => setYear(y=>y+1)}>▶</button>
+          <button className="btn btn-primary" onClick={() => setRevenueModal(true)}>+ Nova Receita</button>
           <button className="btn btn-secondary" onClick={exportCSV}>⬇ Exportar CSV</button>
         </div>
       </div>
@@ -1838,6 +1965,12 @@ function FluxoDeCaixa({ expenses, revenue, onRefresh }) {
           </tbody>
         </table>
       </div>
+      {revenueModal && (
+        <RevenueModal
+          onSave={handleSaveRevenue}
+          onClose={() => setRevenueModal(false)}
+        />
+      )}
     </div>
   );
 }
@@ -2387,6 +2520,8 @@ function App() {
             expenses={expenses}
             revenue={revenue}
             showModal={showModal}
+            onRefresh={() => loadAll(sessionRef.current, true)}
+            session={session}
           />
         )}
         {page === 'contas' && (
