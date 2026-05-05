@@ -598,6 +598,33 @@ canvas { max-width: 100%; }
   .user-info { display: none; }
   .page { padding: 20px 16px; }
 }
+
+/* ── NF UPLOAD & ITEMS ───────────────────────────────── */
+.nf-upload-zone {
+  border: 2px dashed var(--border); border-radius: var(--radius);
+  padding: 20px; text-align: center; cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  background: #faf8f4;
+}
+.nf-upload-zone:hover, .nf-upload-zone.drag { border-color: var(--green); background: #f0fff4; }
+.nf-upload-zone input { display: none; }
+.nf-upload-label { font-size: 12px; color: var(--muted); margin-top: 6px; display: block; }
+.nf-reading { display: flex; align-items: center; gap: 10px; padding: 12px; background: #f0fff4; border: 1px solid var(--green); border-radius: var(--radius); font-size: 13px; color: #0d4a1f; }
+.nf-spinner { width: 16px; height: 16px; border: 2px solid #c8e6c9; border-top-color: var(--green); border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
+@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 spin { to { transform: rotate(360deg); } }
+.items-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+.items-table th { background: #f5f2ed; font-size: 10px; font-weight: 600; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+.items-table td { padding: 7px 10px; border-bottom: 1px solid #f5f2ed; vertical-align: middle; }
+.items-table tr:last-child td { border-bottom: none; }
+.items-table input, .items-table select { border: 1px solid transparent; background: transparent; font-size: 12px; width: 100%; padding: 2px 4px; border-radius: 2px; outline: none; font-family: var(--font-ui); }
+.items-table input:focus, .items-table select:focus { border-color: var(--green); background: #fff; }
+.items-table .mono-input { font-family: var(--font-mono); text-align: right; }
+.items-section { margin-top: 16px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.items-section-header { padding: 10px 14px; background: var(--black); color: #fff; font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; display: flex; align-items: center; justify-content: space-between; }
+.items-total { font-family: var(--font-mono); font-size: 14px; color: var(--green); }
+.expense-detail-panel { padding: 0; }
+.expense-items-view { margin-top: 12px; }
+
 </style>
 </head>
 <body>
@@ -611,6 +638,7 @@ const { useState, useEffect, useRef, useCallback, useMemo, createContext, useCon
 ═══════════════════════════════════════════════════════ */
 const SUPABASE_URL = 'https://xhddxlkltqzmvhnutulm.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_0IM-bG8x5pPC71ZTIbcknQ_U1UUsd5R';
+const ANTHROPIC_API_KEY = 'YOUR_ANTHROPIC_API_KEY'; // substitua pela sua chave
 
 /* ═══════════════════════════════════════════════════════
    SUPABASE CLIENT
@@ -865,6 +893,206 @@ function AuthScreen({ onLogin }) {
   );
 }
 
+
+/* ═══════════════════════════════════════════════════════
+   NF READER — Claude API
+═══════════════════════════════════════════════════════ */
+const ITEM_CATEGORIES = [
+  'Laticínios/Frios','Carnes','Embalagens','Bebidas',
+  'Insumos','Farinhas/Grãos','Doces/Sobremesas',
+  'Higiene/Limpeza','Descartáveis','Outros'
+];
+
+async function readNFWithClaude(pdfBase64) {
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 4000,
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'document',
+            source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 }
+          },
+          {
+            type: 'text',
+            text: `Analise esta Nota Fiscal Eletrônica brasileira e extraia os dados em JSON.
+Responda APENAS com JSON válido, sem markdown, sem explicações.
+
+Formato exato:
+{
+  "supplier_name": "nome do emitente/fornecedor",
+  "amount": 0.00,
+  "due_date": "YYYY-MM-DD",
+  "notes": "código de barras ou linha digitável do boleto se houver, senão null",
+  "items": [
+    {
+      "description": "descrição do produto",
+      "quantity": 0.000,
+      "unit": "unidade (CX, KG, UN, etc)",
+      "unit_price": 0.00,
+      "total": 0.00,
+      "ncm": "código NCM se houver",
+      "category": "categoria mais adequada dentre: Laticínios/Frios, Carnes, Embalagens, Bebidas, Insumos, Farinhas/Grãos, Doces/Sobremesas, Higiene/Limpeza, Descartáveis, Outros"
+    }
+  ]
+}
+
+Para due_date: use a data de vencimento da duplicata/boleto. Se não houver, use a data de emissão.
+Para amount: use o VALOR TOTAL DA NOTA.
+Para cada item: inclua todos os produtos listados na NF.`
+          }
+        ]
+      }]
+    })
+  });
+
+  if (!response.ok) {
+    const err = await response.json();
+    throw new Error(err.error?.message || 'Erro na API Claude');
+  }
+
+  const data = await response.json();
+  const text = data.content?.[0]?.text || '';
+  const clean = text.replace(/```json|```/g, '').trim();
+  return JSON.parse(clean);
+}
+
+/* ═══════════════════════════════════════════════════════
+   EXPENSE ITEMS MODAL — View/Edit items of an expense
+═══════════════════════════════════════════════════════ */
+function ExpenseItemsModal({ expense, onClose }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    sb.from('expense_items').select('*').eq('expense_id', expense.id).order('created_at')
+      .then(({ data }) => { setItems(data || []); setLoading(false); });
+  }, [expense.id]);
+
+  const total = items.reduce((a, b) => a + (parseFloat(b.total) || 0), 0);
+
+  async function updateItem(id, field, value) {
+    setItems(prev => prev.map(i => i.id === id ? { ...i, [field]: value } : i));
+    await sb.from('expense_items').update({ [field]: value }).eq('id', id);
+  }
+
+  async function deleteItem(id) {
+    setItems(prev => prev.filter(i => i.id !== id));
+    await sb.from('expense_items').delete().eq('id', id);
+  }
+
+  async function addItem() {
+    const user = (await sb.auth.getUser()).data.user;
+    const { data } = await sb.from('expense_items').insert({
+      expense_id: expense.id,
+      description: 'Novo item',
+      quantity: 1,
+      total: 0,
+      category: 'Outros',
+      created_by: user?.id,
+    }).select().single();
+    if (data) setItems(prev => [...prev, data]);
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{ maxWidth: 800 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <div className="modal-title">Itens da NF — {expense.supplier_name}</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+              {fmtDate(expense.due_date)} · {fmtBRL(expense.amount)}
+            </div>
+          </div>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body" style={{ padding: '16px 20px' }}>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Carregando itens...</div>
+          ) : (
+            <>
+              <div className="items-section">
+                <div className="items-section-header">
+                  <span>{items.length} iten{items.length !== 1 ? 's' : ''}</span>
+                  <span className="items-total">{fmtBRL(total)}</span>
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="items-table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: '30%' }}>Descrição</th>
+                        <th style={{ width: '13%' }}>Categoria</th>
+                        <th style={{ width: '8%' }}>Qtd</th>
+                        <th style={{ width: '7%' }}>Un</th>
+                        <th style={{ width: '10%' }}>V. Unit</th>
+                        <th style={{ width: '10%' }}>Total</th>
+                        <th style={{ width: '8%' }}>NCM</th>
+                        <th style={{ width: '4%' }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {items.length === 0 ? (
+                        <tr><td colSpan={8} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>Nenhum item. Clique em "+ Adicionar" para inserir manualmente.</td></tr>
+                      ) : items.map(item => (
+                        <tr key={item.id}>
+                          <td>
+                            <input value={item.description} onChange={e => updateItem(item.id, 'description', e.target.value)} style={{ width: '100%' }} />
+                          </td>
+                          <td>
+                            <select value={item.category || ''} onChange={e => updateItem(item.id, 'category', e.target.value)} style={{ width: '100%', fontSize: 11 }}>
+                              {ITEM_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+                            </select>
+                          </td>
+                          <td>
+                            <input className="mono-input" value={item.quantity || ''} onChange={e => updateItem(item.id, 'quantity', e.target.value)} />
+                          </td>
+                          <td>
+                            <input value={item.unit || ''} onChange={e => updateItem(item.id, 'unit', e.target.value)} style={{ textTransform: 'uppercase' }} />
+                          </td>
+                          <td>
+                            <input className="mono-input" value={item.unit_price || ''} onChange={e => updateItem(item.id, 'unit_price', e.target.value)} />
+                          </td>
+                          <td>
+                            <input className="mono-input" value={item.total || ''} onChange={e => updateItem(item.id, 'total', e.target.value)} style={{ color: 'var(--black)', fontWeight: 600 }} />
+                          </td>
+                          <td>
+                            <input value={item.ncm || ''} onChange={e => updateItem(item.id, 'ncm', e.target.value)} style={{ fontSize: 10, color: 'var(--muted)' }} />
+                          </td>
+                          <td>
+                            <button onClick={() => deleteItem(item.id)} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: 14, padding: '2px 4px' }}>✕</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <button className="btn btn-secondary btn-sm" onClick={addItem}>+ Adicionar Item</button>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  Clique em qualquer célula para editar. Alterações salvas automaticamente.
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-primary" onClick={onClose}>Fechar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════
    EXPENSE MODAL
 ═══════════════════════════════════════════════════════ */
@@ -916,6 +1144,10 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
   const [form, setForm] = useState(getInitial);
   const [saving, setSaving] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [nfReading, setNfReading] = useState(false);
+  const [nfItems, setNfItems] = useState(null); // items extracted from NF
+  const [nfFileName, setNfFileName] = useState('');
+  const fileInputRef = useRef(null);
 
   // Auto-save draft on every keystroke (new expenses only)
   useEffect(() => {
@@ -929,6 +1161,42 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
   );
 
   function set(k, v) { setForm(p => ({ ...p, [k]: v })); }
+
+  async function handleNFUpload(file) {
+    if (!file || file.type !== 'application/pdf') { toast('Selecione um arquivo PDF.', 'error'); return; }
+    setNfFileName(file.name);
+    setNfReading(true);
+    setNfItems(null);
+    try {
+      // Read PDF as base64
+      const base64 = await new Promise((res, rej) => {
+        const reader = new FileReader();
+        reader.onload = e => res(e.target.result.split(',')[1]);
+        reader.onerror = rej;
+        reader.readAsDataURL(file);
+      });
+
+      const result = await readNFWithClaude(base64);
+
+      // Auto-fill form fields
+      if (result.supplier_name) set('supplier_name', result.supplier_name);
+      if (result.amount) set('amount', result.amount.toFixed(2).replace('.', ','));
+      if (result.due_date) set('due_date', result.due_date);
+      if (result.notes) set('notes', result.notes);
+
+      // Store items for saving after expense is created
+      if (result.items && result.items.length > 0) {
+        setNfItems(result.items);
+        toast(`NF lida com sucesso! ${result.items.length} itens encontrados.`, 'success');
+      } else {
+        toast('NF lida! Nenhum item encontrado — verifique o PDF.', 'info');
+      }
+    } catch (err) {
+      console.error(err);
+      toast('Erro ao ler NF: ' + err.message, 'error');
+    }
+    setNfReading(false);
+  }
 
   async function handleSave() {
     if (!form.supplier_name || !form.category || !form.amount || !form.due_date) {
@@ -948,7 +1216,7 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
       notes: form.notes || null,
     };
     try { sessionStorage.removeItem(DRAFT_KEY); } catch {}
-    await onSave(payload);
+    const savedExpense = await onSave(payload, nfItems);
     setSaving(false);
   }
 
@@ -971,6 +1239,33 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
           <button className="modal-close" onClick={handleClose}>✕</button>
         </div>
         <div className="modal-body">
+          {/* NF Upload Zone */}
+          {!expense && (
+            <div style={{ marginBottom: 20 }}>
+              {nfReading ? (
+                <div className="nf-reading">
+                  <div className="nf-spinner" />
+                  <span>Lendo Nota Fiscal com IA... aguarde.</span>
+                </div>
+              ) : nfItems ? (
+                <div style={{ background: '#f0fff4', border: '1px solid var(--green)', borderRadius: 'var(--radius)', padding: '10px 14px', fontSize: 13 }}>
+                  <span style={{ color: 'var(--green)', fontWeight: 600 }}>✓ NF lida:</span> {nfFileName} · <strong>{nfItems.length} itens</strong> extraídos
+                  <button className="btn btn-ghost btn-sm" style={{ marginLeft: 10 }} onClick={() => { setNfItems(null); setNfFileName(''); }}>✕ Remover</button>
+                </div>
+              ) : (
+                <div className="nf-upload-zone" onClick={() => fileInputRef.current?.click()}
+                  onDragOver={e => { e.preventDefault(); e.currentTarget.classList.add('drag'); }}
+                  onDragLeave={e => e.currentTarget.classList.remove('drag')}
+                  onDrop={e => { e.preventDefault(); e.currentTarget.classList.remove('drag'); const f = e.dataTransfer.files[0]; if(f) handleNFUpload(f); }}>
+                  <input ref={fileInputRef} type="file" accept=".pdf" onChange={e => { if(e.target.files[0]) handleNFUpload(e.target.files[0]); }} />
+                  <div style={{ fontSize: 22 }}>📄</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, marginTop: 4 }}>Importar Nota Fiscal (PDF)</div>
+                  <span className="nf-upload-label">Arraste o PDF aqui ou clique para selecionar · Preenche o formulário automaticamente</span>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="form-grid">
             <div className="form-group full" style={{ position: 'relative' }}>
               <label className="form-label">Fornecedor *</label>
@@ -1071,10 +1366,47 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
             </div>
           </div>
         </div>
+        {/* NF Items Preview */}
+        {nfItems && nfItems.length > 0 && (
+          <div style={{ padding: '0 28px 16px' }}>
+            <div className="items-section">
+              <div className="items-section-header">
+                <span>Itens da NF — {nfItems.length} produtos</span>
+                <span className="items-total">{fmtBRL(nfItems.reduce((a,b) => a + (b.total||0), 0))}</span>
+              </div>
+              <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+                <table className="items-table">
+                  <thead>
+                    <tr><th>Descrição</th><th>Categoria</th><th>Qtd</th><th>Un</th><th>V.Unit</th><th>Total</th></tr>
+                  </thead>
+                  <tbody>
+                    {nfItems.map((item, i) => (
+                      <tr key={i}>
+                        <td style={{ fontSize: 11 }}>{item.description}</td>
+                        <td>
+                          <select style={{ fontSize: 10, border: '1px solid var(--border)', borderRadius: 2, padding: '1px 4px', width: '100%' }}
+                            value={item.category || 'Outros'}
+                            onChange={e => setNfItems(prev => prev.map((it,idx) => idx===i ? {...it, category: e.target.value} : it))}>
+                            {ITEM_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+                          </select>
+                        </td>
+                        <td className="mono" style={{ fontSize: 11 }}>{item.quantity}</td>
+                        <td style={{ fontSize: 10, color: 'var(--muted)' }}>{item.unit}</td>
+                        <td className="mono" style={{ fontSize: 11 }}>{fmtBRL(item.unit_price)}</td>
+                        <td className="mono" style={{ fontSize: 11, fontWeight: 600 }}>{fmtBRL(item.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="modal-footer">
           <button className="btn btn-secondary" onClick={handleClose}>Cancelar</button>
           <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-            {saving ? 'Salvando...' : 'Salvar Despesa'}
+            {saving ? 'Salvando...' : nfItems ? 'Salvar Despesa + Itens' : 'Salvar Despesa'}
           </button>
         </div>
       </div>
@@ -1322,6 +1654,7 @@ function Dashboard({ expenses, revenue, showModal, onRefresh, session }) {
 ═══════════════════════════════════════════════════════ */
 function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isOwner }) {
   const [filter, setFilter] = useState({ status: 'todos', category: '', search: '', from: '', to: '' });
+  const [itemsModal, setItemsModal] = useState(null);
   const [modal, setModal] = useState(() => {
     try {
       const saved = sessionStorage.getItem('vg_modal_state');
@@ -1370,21 +1703,44 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
   const weekExp = filtered.reduce((a,b) => a + b.amount, 0);
   const weekDiff = weekRevenue - weekExp;
 
-  async function handleSave(payload) {
+  async function handleSave(payload, nfItems) {
     const user = (await sb.auth.getUser()).data.user;
+    let savedExpense = null;
     if (modal.expense) {
       const { data, error } = await sb.from('expenses').update({ ...payload, created_by: user.id }).eq('id', modal.expense.id).select().single();
       if (error) { toast('Erro ao salvar: ' + error.message, 'error'); return; }
+      savedExpense = data;
       if (data) setExpenses(prev => prev.map(e => e.id === data.id ? data : e));
     } else {
       const { data, error } = await sb.from('expenses').insert({ ...payload, created_by: user.id }).select().single();
       if (error) { toast('Erro ao salvar: ' + error.message, 'error'); return; }
+      savedExpense = data;
       if (data) setExpenses(prev => [data, ...prev]);
     }
-    toast('Despesa salva com sucesso!', 'success');
+
+    // Save NF items if present
+    if (nfItems && nfItems.length > 0 && savedExpense) {
+      const itemsPayload = nfItems.map(item => ({
+        expense_id: savedExpense.id,
+        description: item.description,
+        quantity: parseFloat(item.quantity) || 1,
+        unit: item.unit || null,
+        unit_price: parseFloat(item.unit_price) || null,
+        total: parseFloat(item.total) || 0,
+        category: item.category || 'Outros',
+        ncm: item.ncm || null,
+      }));
+      const { error: itemsError } = await sb.from('expense_items').insert(itemsPayload);
+      if (itemsError) toast('Despesa salva, mas erro ao salvar itens: ' + itemsError.message, 'error');
+      else toast(`Despesa + ${nfItems.length} itens salvos com sucesso!`, 'success');
+    } else {
+      toast('Despesa salva com sucesso!', 'success');
+    }
+
     try { sessionStorage.removeItem('vg_modal_state'); sessionStorage.removeItem('vg_expense_draft'); } catch {}
     setModal(null);
     onRefresh();
+    return savedExpense;
   }
 
   async function markPaid(exp) {
@@ -1509,6 +1865,7 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
                       ) : (
                         <button className="btn btn-ghost btn-sm" onClick={() => markPending(e)}>↩ Reabrir</button>
                       )}
+                      <button className="btn btn-ghost btn-sm" title="Ver itens da NF" onClick={() => setItemsModal(e)}>📄</button>
                       <button className="btn btn-ghost btn-sm" onClick={() => setModal({ type: 'edit', expense: e })}>✎</button>
                       {isOwner && <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => setConfirm(e)}>✕</button>}
                     </div>
@@ -1535,6 +1892,13 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
           msg={`Deseja excluir a despesa de ${fmtBRL(confirm.amount)} para ${confirm.supplier_name}? Esta ação não pode ser desfeita.`}
           onConfirm={() => handleDelete(confirm.id)}
           onCancel={() => setConfirm(null)}
+        />
+      )}
+
+      {itemsModal && (
+        <ExpenseItemsModal
+          expense={itemsModal}
+          onClose={() => setItemsModal(null)}
         />
       )}
 
