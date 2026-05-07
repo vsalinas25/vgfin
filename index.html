@@ -652,14 +652,14 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
    INDEXEDDB OFFLINE CACHE
 ═══════════════════════════════════════════════════════ */
 const DB_NAME = 'vg-finance-cache';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 function openDB() {
   return new Promise((res, rej) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = e => {
       const db = e.target.result;
-      ['expenses','suppliers','revenue','forecast','profiles','pending_sync'].forEach(s => {
+      ['expenses','suppliers','revenue','forecast','profiles','pending_sync','expense_items'].forEach(s => {
         if (!db.objectStoreNames.contains(s)) db.createObjectStore(s);
       });
     };
@@ -3059,16 +3059,23 @@ function App() {
   async function loadAll(s, silent = false) {
     if (!s) return;
     if (!silent) setLoading(true);
+
+    // Safety timeout — never stay stuck on loading
+    const timeout = setTimeout(() => {
+      console.warn('loadAll timeout — forcing render');
+      setLoading(false);
+    }, 8000);
+
     try {
-      const [expRes, supRes, revRes, fcRes, profRes] = await Promise.all([
+      // Load each table independently so one failure doesn't block others
+      const [expRes, supRes, revRes, fcRes] = await Promise.all([
         sb.from('expenses').select('*').order('due_date', { ascending: false }),
         sb.from('suppliers').select('*').order('name'),
         sb.from('revenue').select('*'),
         sb.from('forecast').select('*'),
-        sb.from('profiles').select('*').eq('id', s.user.id).single(),
       ]);
 
-      if (expRes.data) { setExpenses(expRes.data); await idbSet('expenses','all',expRes.data); }
+      if (expRes.data) { setExpenses(expRes.data); idbSet('expenses','all',expRes.data); }
       else { const cached = await idbGet('expenses','all'); if(cached) setExpenses(cached); }
 
       if (supRes.data) {
@@ -3078,44 +3085,50 @@ function App() {
           sups = seeded || [];
         }
         setSuppliers(sups);
-        await idbSet('suppliers','all',sups);
+        idbSet('suppliers','all',sups);
       } else { const cached = await idbGet('suppliers','all'); if(cached) setSuppliers(cached); }
 
-      if (revRes.data) { setRevenue(revRes.data); await idbSet('revenue','all',revRes.data); }
+      if (revRes.data) { setRevenue(revRes.data); idbSet('revenue','all',revRes.data); }
       else { const cached = await idbGet('revenue','all'); if(cached) setRevenue(cached); }
 
-      if (fcRes.data) { setForecast(fcRes.data); }
+      if (fcRes.data) setForecast(fcRes.data);
 
-      // Load expense_items separately — non-blocking
-      sb.from('expense_items').select('*').then(({ data }) => {
-        if (data) { setExpenseItems(data); idbSet('expense_items','all',data); }
-      }).catch(() => {
-        idbGet('expense_items','all').then(cached => { if(cached) setExpenseItems(cached); });
-      });
-      if (profRes.data) {
-        setProfile(profRes.data);
-      } else if (profRes.error) {
-        // Profile exists but couldn't be read — try fetching without single()
-        const { data: profiles } = await sb.from('profiles').select('*').eq('id', s.user.id);
-        if (profiles && profiles.length > 0) {
-          setProfile(profiles[0]);
+      // Profile — load separately with fallback
+      try {
+        const { data: profData } = await sb.from('profiles').select('*').eq('id', s.user.id);
+        if (profData && profData.length > 0) {
+          setProfile(profData[0]);
         } else {
-          // Truly new user — create profile
           const newProfile = { id: s.user.id, name: s.user.email.split('@')[0], role: 'staff' };
           await sb.from('profiles').insert(newProfile);
           setProfile(newProfile);
         }
+      } catch(profErr) {
+        console.error('Profile load error:', profErr);
       }
+
+      // expense_items — non-blocking, load after main render
+      sb.from('expense_items').select('*')
+        .then(({ data }) => { if (data) { setExpenseItems(data); idbSet('expense_items','all',data); } })
+        .catch(e => console.warn('expense_items load failed:', e));
 
       setLastSync(new Date());
     } catch (err) {
-      console.error(err);
-      const [ce, cs, cr] = await Promise.all([idbGet('expenses','all'), idbGet('suppliers','all'), idbGet('revenue','all')]);
-      if (ce) setExpenses(ce);
-      if (cs) setSuppliers(cs);
-      if (cr) setRevenue(cr);
+      console.error('loadAll error:', err);
+      try {
+        const [ce, cs, cr, ci] = await Promise.all([
+          idbGet('expenses','all'), idbGet('suppliers','all'),
+          idbGet('revenue','all'), idbGet('expense_items','all')
+        ]);
+        if (ce) setExpenses(ce);
+        if (cs) setSuppliers(cs);
+        if (cr) setRevenue(cr);
+        if (ci) setExpenseItems(ci);
+      } catch(e) { console.warn('Cache fallback failed:', e); }
+    } finally {
+      clearTimeout(timeout);
+      if (!silent) setLoading(false);
     }
-    if (!silent) setLoading(false);
   }
 
   async function handleLogin(s) {
