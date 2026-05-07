@@ -3060,13 +3060,12 @@ function App() {
     if (!s) return;
     if (!silent) setLoading(true);
     try {
-      const [expRes, supRes, revRes, fcRes, profRes, itemsRes] = await Promise.all([
+      const [expRes, supRes, revRes, fcRes, profRes] = await Promise.all([
         sb.from('expenses').select('*').order('due_date', { ascending: false }),
         sb.from('suppliers').select('*').order('name'),
         sb.from('revenue').select('*'),
         sb.from('forecast').select('*'),
         sb.from('profiles').select('*').eq('id', s.user.id).single(),
-        sb.from('expense_items').select('*'),
       ]);
 
       if (expRes.data) { setExpenses(expRes.data); await idbSet('expenses','all',expRes.data); }
@@ -3086,7 +3085,13 @@ function App() {
       else { const cached = await idbGet('revenue','all'); if(cached) setRevenue(cached); }
 
       if (fcRes.data) { setForecast(fcRes.data); }
-      if (itemsRes?.data) { setExpenseItems(itemsRes.data); await idbSet('expense_items','all',itemsRes.data); }
+
+      // Load expense_items separately — non-blocking
+      sb.from('expense_items').select('*').then(({ data }) => {
+        if (data) { setExpenseItems(data); idbSet('expense_items','all',data); }
+      }).catch(() => {
+        idbGet('expense_items','all').then(cached => { if(cached) setExpenseItems(cached); });
+      });
       if (profRes.data) {
         setProfile(profRes.data);
       } else if (profRes.error) {
