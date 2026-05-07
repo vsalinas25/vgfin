@@ -638,7 +638,7 @@ const { useState, useEffect, useRef, useCallback, useMemo, createContext, useCon
 ═══════════════════════════════════════════════════════ */
 const SUPABASE_URL = 'https://xhddxlkltqzmvhnutulm.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_0IM-bG8x5pPC71ZTIbcknQ_U1UUsd5R';
-const ANTHROPIC_API_KEY = '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'; // substitua pela sua chave
+// API key gerenciada pelo Cloudflare Worker — não é necessário configurar aqui
 
 /* ═══════════════════════════════════════════════════════
    SUPABASE CLIENT
@@ -924,7 +924,6 @@ Regras: due_date = vencimento do boleto/duplicata (YYYY-MM-DD). amount = valor t
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-API-Key': ANTHROPIC_API_KEY,
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
@@ -2321,15 +2320,308 @@ function FluxoDeCaixa({ expenses, revenue, onRefresh }) {
   );
 }
 
+
+/* ═══════════════════════════════════════════════════════
+   INSUMOS — Gastos por Categoria de Item
+═══════════════════════════════════════════════════════ */
+function InsumosCatChart({ expenseItems, expenses }) {
+  const chartRef = useRef(null);
+  const chartInst = useRef(null);
+  const [period, setPeriod] = useState('month');
+  const now = new Date();
+
+  const filtered = expenseItems.filter(item => {
+    const exp = expenses.find(e => e.id === item.expense_id);
+    if (!exp) return false;
+    if (period === 'month') return exp.due_date.startsWith(monthISO(now));
+    if (period === 'year') return exp.due_date.startsWith(now.getFullYear().toString());
+    return true;
+  });
+
+  const catTotals = {};
+  filtered.forEach(item => {
+    const cat = item.category || 'Outros';
+    catTotals[cat] = (catTotals[cat] || 0) + (parseFloat(item.total) || 0);
+  });
+
+  const sorted = Object.entries(catTotals).sort((a,b) => b[1]-a[1]);
+
+  useEffect(() => {
+    if (!chartRef.current || sorted.length === 0) return;
+    if (chartInst.current) chartInst.current.destroy();
+    chartInst.current = new Chart(chartRef.current, {
+      type: 'bar',
+      data: {
+        labels: sorted.map(([c]) => c),
+        datasets: [{ data: sorted.map(([,v]) => v), backgroundColor: '#19903a', borderRadius: 2 }]
+      },
+      options: {
+        indexAxis: 'y', responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { callback: v => 'R$'+Math.round(v/1000)+'k', font: { family: 'JetBrains Mono', size: 10 } }, grid: { color: '#f0ece6' } },
+          y: { ticks: { font: { family: 'DM Sans', size: 11 } }, grid: { display: false } }
+        }
+      }
+    });
+    return () => { if(chartInst.current) chartInst.current.destroy(); };
+  }, [filtered.length, period]);
+
+  const total = sorted.reduce((a,[,v]) => a+v, 0);
+
+  return (
+    <div className="chart-card">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+        <div>
+          <div className="chart-title">Gastos por Categoria de Insumo</div>
+          <div className="chart-sub">Total: {fmtBRL(total)}</div>
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {[['month','Mês'],['year','Ano'],['all','Tudo']].map(([v,l]) => (
+            <button key={v} className={`btn btn-sm ${period===v?'btn-primary':'btn-secondary'}`} onClick={() => setPeriod(v)}>{l}</button>
+          ))}
+        </div>
+      </div>
+      {sorted.length === 0 ? (
+        <div style={{ color: 'var(--muted)', fontSize: 13, padding: '20px 0' }}>Sem dados para o período selecionado.</div>
+      ) : (
+        <>
+          <canvas ref={chartRef} height={Math.min(sorted.length * 28 + 40, 300)} />
+          <table style={{ width: '100%', marginTop: 12, fontSize: 12, borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: '#f5f2ed' }}>
+                <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--muted)', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Categoria</th>
+                <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600, color: 'var(--muted)', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Total</th>
+                <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600, color: 'var(--muted)', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase' }}>% do Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map(([cat, val]) => (
+                <tr key={cat} style={{ borderBottom: '1px solid #f0ece6' }}>
+                  <td style={{ padding: '7px 10px', fontWeight: 500 }}>{cat}</td>
+                  <td style={{ padding: '7px 10px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{fmtBRL(val)}</td>
+                  <td style={{ padding: '7px 10px', textAlign: 'right', color: 'var(--muted)' }}>{total > 0 ? (val/total*100).toFixed(1) : 0}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   INSUMOS — Top Produtos por Gasto
+═══════════════════════════════════════════════════════ */
+function TopProdutosChart({ expenseItems, expenses }) {
+  const [period, setPeriod] = useState('year');
+  const [limit, setLimit] = useState(15);
+  const now = new Date();
+
+  const filtered = expenseItems.filter(item => {
+    const exp = expenses.find(e => e.id === item.expense_id);
+    if (!exp) return false;
+    if (period === 'month') return exp.due_date.startsWith(monthISO(now));
+    if (period === 'year') return exp.due_date.startsWith(now.getFullYear().toString());
+    return true;
+  });
+
+  const prodTotals = {};
+  const prodCats = {};
+  filtered.forEach(item => {
+    const key = item.description;
+    prodTotals[key] = (prodTotals[key] || 0) + (parseFloat(item.total) || 0);
+    prodCats[key] = item.category || 'Outros';
+  });
+
+  const sorted = Object.entries(prodTotals).sort((a,b) => b[1]-a[1]).slice(0, limit);
+  const grandTotal = Object.values(prodTotals).reduce((a,b) => a+b, 0);
+
+  return (
+    <div className="chart-card">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div>
+          <div className="chart-title">Top Produtos por Gasto</div>
+          <div className="chart-sub">{sorted.length} de {Object.keys(prodTotals).length} produtos</div>
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {[['month','Mês'],['year','Ano'],['all','Tudo']].map(([v,l]) => (
+            <button key={v} className={`btn btn-sm ${period===v?'btn-primary':'btn-secondary'}`} onClick={() => setPeriod(v)}>{l}</button>
+          ))}
+        </div>
+      </div>
+      {sorted.length === 0 ? (
+        <div style={{ color: 'var(--muted)', fontSize: 13 }}>Sem dados para o período.</div>
+      ) : (
+        <>
+          {sorted.map(([name, total], i) => {
+            const pct = grandTotal > 0 ? (total/grandTotal*100) : 0;
+            return (
+              <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                <div style={{ width: 20, fontSize: 10, color: 'var(--muted)', textAlign: 'right', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{i+1}</div>
+                <div style={{ width: 200, fontSize: 12, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0 }} title={name}>{name}</div>
+                <div style={{ fontSize: 9, color: 'var(--muted)', background: '#f0ece6', padding: '1px 6px', borderRadius: 2, flexShrink: 0 }}>{prodCats[name]}</div>
+                <div style={{ flex: 1, height: 8, background: '#f0ece6', borderRadius: 2, overflow: 'hidden' }}>
+                  <div style={{ width: pct+'%', height: '100%', background: 'var(--green)' }} />
+                </div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, width: 90, textAlign: 'right', flexShrink: 0, fontWeight: 600 }}>{fmtBRL(total)}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', width: 40, textAlign: 'right', flexShrink: 0 }}>{pct.toFixed(1)}%</div>
+              </div>
+            );
+          })}
+          {Object.keys(prodTotals).length > limit && (
+            <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => setLimit(l => l+15)}>
+              Ver mais {Math.min(15, Object.keys(prodTotals).length-limit)} produtos
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   INSUMOS — Evolução de Preço por Produto
+═══════════════════════════════════════════════════════ */
+function PriceEvolutionChart({ expenseItems, expenses }) {
+  const chartRef = useRef(null);
+  const chartInst = useRef(null);
+  const [selectedProduct, setSelectedProduct] = useState('');
+
+  // Get unique product names sorted
+  const allProducts = [...new Set(expenseItems.map(i => i.description))].sort();
+
+  // Get price history for selected product
+  const history = expenseItems
+    .filter(i => i.description === selectedProduct && i.unit_price)
+    .map(i => {
+      const exp = expenses.find(e => e.id === i.expense_id);
+      return { date: exp?.due_date, price: parseFloat(i.unit_price), supplier: exp?.supplier_name, qty: i.quantity, unit: i.unit };
+    })
+    .filter(h => h.date)
+    .sort((a,b) => a.date.localeCompare(b.date));
+
+  useEffect(() => {
+    if (!chartRef.current || history.length < 2) return;
+    if (chartInst.current) chartInst.current.destroy();
+    chartInst.current = new Chart(chartRef.current, {
+      type: 'line',
+      data: {
+        labels: history.map(h => fmtDate(h.date)),
+        datasets: [{
+          label: 'Preço unitário',
+          data: history.map(h => h.price),
+          borderColor: '#19903a',
+          backgroundColor: 'rgba(25,144,58,0.08)',
+          fill: true,
+          tension: 0.3,
+          pointRadius: 5,
+          pointBackgroundColor: '#19903a',
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { ticks: { callback: v => 'R$'+v.toFixed(2), font: { family: 'JetBrains Mono', size: 10 } }, grid: { color: '#f0ece6' } },
+          x: { ticks: { font: { family: 'DM Sans', size: 10 } }, grid: { display: false } }
+        }
+      }
+    });
+    return () => { if(chartInst.current) chartInst.current.destroy(); };
+  }, [selectedProduct, history.length]);
+
+  // Price variation
+  const firstPrice = history[0]?.price;
+  const lastPrice = history[history.length-1]?.price;
+  const variation = firstPrice && lastPrice ? ((lastPrice - firstPrice) / firstPrice * 100) : null;
+
+  return (
+    <div className="chart-card">
+      <div className="chart-title">Evolução de Preço por Produto</div>
+      <div className="chart-sub">Histórico de preço unitário ao longo das compras</div>
+
+      <div style={{ marginBottom: 16 }}>
+        <select className="form-control" style={{ maxWidth: 400 }} value={selectedProduct} onChange={e => setSelectedProduct(e.target.value)}>
+          <option value="">Selecione um produto...</option>
+          {allProducts.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+      </div>
+
+      {!selectedProduct ? (
+        <div style={{ color: 'var(--muted)', fontSize: 13 }}>Selecione um produto para ver a evolução de preço.</div>
+      ) : history.length === 0 ? (
+        <div style={{ color: 'var(--muted)', fontSize: 13 }}>Nenhum histórico de preço para este produto.</div>
+      ) : (
+        <>
+          {variation !== null && (
+            <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
+              <div className="metric-card" style={{ padding: '12px 16px', flex: 1 }}>
+                <div className="metric-label">Primeiro Preço</div>
+                <div className="metric-value" style={{ fontSize: 16 }}>{fmtBRL(firstPrice)}</div>
+                <div className="metric-sub">{fmtDate(history[0].date)}</div>
+              </div>
+              <div className="metric-card" style={{ padding: '12px 16px', flex: 1 }}>
+                <div className="metric-label">Último Preço</div>
+                <div className="metric-value" style={{ fontSize: 16 }}>{fmtBRL(lastPrice)}</div>
+                <div className="metric-sub">{fmtDate(history[history.length-1].date)}</div>
+              </div>
+              <div className="metric-card" style={{ padding: '12px 16px', flex: 1 }}>
+                <div className="metric-label">Variação Total</div>
+                <div className={`metric-value ${variation >= 0 ? 'negative' : 'positive'}`} style={{ fontSize: 16 }}>
+                  {variation >= 0 ? '+' : ''}{variation.toFixed(1)}%
+                </div>
+                <div className="metric-sub">{history.length} compra{history.length > 1 ? 's' : ''}</div>
+              </div>
+            </div>
+          )}
+          {history.length >= 2 ? (
+            <canvas ref={chartRef} height={80} />
+          ) : (
+            <div style={{ color: 'var(--muted)', fontSize: 13 }}>Apenas 1 registro — são necessários 2+ para mostrar evolução.</div>
+          )}
+          <table style={{ width: '100%', marginTop: 12, fontSize: 12, borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: '#f5f2ed' }}>
+                <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--muted)', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Data</th>
+                <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--muted)', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Fornecedor</th>
+                <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600, color: 'var(--muted)', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Qtd</th>
+                <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600, color: 'var(--muted)', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase' }}>V. Unit</th>
+                <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600, color: 'var(--muted)', fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map((h, i) => (
+                <tr key={i} style={{ borderBottom: '1px solid #f0ece6' }}>
+                  <td style={{ padding: '7px 10px' }}>{fmtDate(h.date)}</td>
+                  <td style={{ padding: '7px 10px', color: 'var(--muted)', fontSize: 11 }}>{h.supplier}</td>
+                  <td style={{ padding: '7px 10px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{h.qty} {h.unit}</td>
+                  <td style={{ padding: '7px 10px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{fmtBRL(h.price)}</td>
+                  <td style={{ padding: '7px 10px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{fmtBRL(h.price * h.qty)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════
    MODULE 5 — RELATÓRIOS
 ═══════════════════════════════════════════════════════ */
-function Relatorios({ expenses, revenue }) {
+function Relatorios({ expenses, revenue, expenseItems }) {
   const catChartRef = useRef(null);
   const revExpChartRef = useRef(null);
   const resultChartRef = useRef(null);
   const balanceChartRef = useRef(null);
+  const itemCatChartRef = useRef(null);
+  const priceEvolutionChartRef = useRef(null);
   const charts = useRef({});
+  const [selectedProduct, setSelectedProduct] = useState('');
+  const [itemPeriod, setItemPeriod] = useState('all'); // all | year | month
 
   useEffect(() => {
     buildCharts();
@@ -2510,6 +2802,33 @@ function Relatorios({ expenses, revenue }) {
         <div className="chart-sub">Últimos 12 meses</div>
         <canvas ref={balanceChartRef} height={80} />
       </div>
+
+      {/* ── ANÁLISE DE INSUMOS ─────────────────────────── */}
+      <div style={{ marginTop: 8, marginBottom: 8 }}>
+        <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 900, marginBottom: 4 }}>Análise de Insumos</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>Baseado nos itens das Notas Fiscais importadas</div>
+      </div>
+
+      {expenseItems.length === 0 ? (
+        <div className="chart-card">
+          <div className="empty-state">
+            <div className="empty-amount">R$ 0,00</div>
+            <div className="empty-msg">Nenhum item de NF registrado ainda.<br/>Importe uma Nota Fiscal ao criar uma despesa.</div>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Gastos por Categoria de Item */}
+          <InsumosCatChart expenseItems={expenseItems} expenses={expenses} />
+
+          {/* Top Produtos */}
+          <TopProdutosChart expenseItems={expenseItems} expenses={expenses} />
+
+          {/* Evolução de Preço por Produto */}
+          <PriceEvolutionChart expenseItems={expenseItems} expenses={expenses} />
+        </>
+      )}
+
     </div>
   );
 }
@@ -2684,6 +3003,7 @@ function App() {
   const [suppliers, setSuppliers] = useState([]);
   const [revenue, setRevenue] = useState([]);
   const [forecast, setForecast] = useState([]);
+  const [expenseItems, setExpenseItems] = useState([]);
 
   // Keep session in a ref so callbacks always have the latest value
   const sessionRef = useRef(null);
@@ -2740,12 +3060,13 @@ function App() {
     if (!s) return;
     if (!silent) setLoading(true);
     try {
-      const [expRes, supRes, revRes, fcRes, profRes] = await Promise.all([
+      const [expRes, supRes, revRes, fcRes, profRes, itemsRes] = await Promise.all([
         sb.from('expenses').select('*').order('due_date', { ascending: false }),
         sb.from('suppliers').select('*').order('name'),
         sb.from('revenue').select('*'),
         sb.from('forecast').select('*'),
         sb.from('profiles').select('*').eq('id', s.user.id).single(),
+        sb.from('expense_items').select('*'),
       ]);
 
       if (expRes.data) { setExpenses(expRes.data); await idbSet('expenses','all',expRes.data); }
@@ -2765,10 +3086,20 @@ function App() {
       else { const cached = await idbGet('revenue','all'); if(cached) setRevenue(cached); }
 
       if (fcRes.data) { setForecast(fcRes.data); }
-      if (profRes.data) setProfile(profRes.data);
-      else {
-        await sb.from('profiles').insert({ id: s.user.id, name: s.user.email.split('@')[0], role: 'owner' });
-        setProfile({ id: s.user.id, name: s.user.email.split('@')[0], role: 'owner' });
+      if (itemsRes?.data) { setExpenseItems(itemsRes.data); await idbSet('expense_items','all',itemsRes.data); }
+      if (profRes.data) {
+        setProfile(profRes.data);
+      } else if (profRes.error) {
+        // Profile exists but couldn't be read — try fetching without single()
+        const { data: profiles } = await sb.from('profiles').select('*').eq('id', s.user.id);
+        if (profiles && profiles.length > 0) {
+          setProfile(profiles[0]);
+        } else {
+          // Truly new user — create profile
+          const newProfile = { id: s.user.id, name: s.user.email.split('@')[0], role: 'staff' };
+          await sb.from('profiles').insert(newProfile);
+          setProfile(newProfile);
+        }
       }
 
       setLastSync(new Date());
@@ -2896,7 +3227,7 @@ function App() {
           />
         )}
         {page === 'relatorios' && isOwner && (
-          <Relatorios expenses={expenses} revenue={revenue} />
+          <Relatorios expenses={expenses} revenue={revenue} expenseItems={expenseItems} />
         )}
         {page === 'config' && isOwner && (
           <Configuracoes
