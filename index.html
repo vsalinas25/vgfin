@@ -1636,6 +1636,7 @@ function Dashboard({ expenses, revenue, showModal, onRefresh, session }) {
 function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isOwner }) {
   const [filter, setFilter] = useState({ status: 'todos', category: '', search: '', from: '', to: '' });
   const [itemsModal, setItemsModal] = useState(null);
+  const [codigoModal, setCodigoModal] = useState(null);
   const [modal, setModal] = useState(() => {
     try {
       const saved = sessionStorage.getItem('vg_modal_state');
@@ -1846,6 +1847,7 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
                       ) : (
                         <button className="btn btn-ghost btn-sm" onClick={() => markPending(e)}>↩ Reabrir</button>
                       )}
+                      {e.notes && <button className="btn btn-ghost btn-sm" title="Ver código de barras / PIX" onClick={() => setCodigoModal(e)}>💳</button>}
                       <button className="btn btn-ghost btn-sm" title="Ver itens da NF" onClick={() => setItemsModal(e)}>📄</button>
                       <button className="btn btn-ghost btn-sm" onClick={() => setModal({ type: 'edit', expense: e })}>✎</button>
                       {isOwner && <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => setConfirm(e)}>✕</button>}
@@ -1874,6 +1876,44 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
           onConfirm={() => handleDelete(confirm.id)}
           onCancel={() => setConfirm(null)}
         />
+      )}
+
+      {codigoModal && (
+        <div className="modal-overlay" onClick={() => setCodigoModal(null)}>
+          <div className="modal-box" style={{ maxWidth: 500 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <div className="modal-title">Código de Pagamento</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{codigoModal.supplier_name} · {fmtBRL(codigoModal.amount)} · {fmtDate(codigoModal.due_date)}</div>
+              </div>
+              <button className="modal-close" onClick={() => setCodigoModal(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>
+                {codigoModal.payment_method === 'Pix' ? 'PIX Copia e Cola' : 'Código de Barras / Linha Digitável'}
+              </div>
+              <div style={{
+                background: '#f5f2ed', border: '1px solid var(--border)',
+                borderRadius: 'var(--radius)', padding: '14px 16px',
+                fontFamily: 'var(--font-mono)', fontSize: 12,
+                wordBreak: 'break-all', lineHeight: 1.6,
+                color: 'var(--black)'
+              }}>
+                {codigoModal.notes}
+              </div>
+              <button
+                className="btn btn-primary"
+                style={{ marginTop: 14, width: '100%' }}
+                onClick={() => {
+                  navigator.clipboard.writeText(codigoModal.notes);
+                  toast('Código copiado!', 'success');
+                }}
+              >
+                📋 Copiar Código
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {itemsModal && (
@@ -2320,6 +2360,266 @@ function FluxoDeCaixa({ expenses, revenue, onRefresh }) {
   );
 }
 
+
+
+/* ═══════════════════════════════════════════════════════
+   MODULE — RECEITAS
+═══════════════════════════════════════════════════════ */
+function Receitas({ revenue, setRevenue, onRefresh, session }) {
+  const [modal, setModal] = useState(null); // null | {mode:'new'} | {mode:'edit', rec}
+  const [confirm, setConfirm] = useState(null);
+  const [filter, setFilter] = useState({ type: 'todos', from: '', to: '', cliente: '' });
+
+  const filtered = revenue.filter(r => {
+    if (filter.type !== 'todos' && r.tipo !== filter.type) return false;
+    if (filter.cliente && r.cliente !== filter.cliente) return false;
+    if (filter.from) {
+      const d = r.date || (r.month + '-01');
+      if (d < filter.from) return false;
+    }
+    if (filter.to) {
+      const d = r.date || (r.month + '-28');
+      if (d > filter.to) return false;
+    }
+    return true;
+  }).sort((a,b) => {
+    const da = a.date || (a.month + '-01');
+    const db = b.date || (b.month + '-01');
+    return db.localeCompare(da);
+  });
+
+  const totalOp = filtered.filter(r => r.tipo === 'operacional' || !r.tipo).reduce((a,b) => a + parseFloat(b.amount), 0);
+  const totalNop = filtered.filter(r => r.tipo === 'nao_operacional').reduce((a,b) => a + parseFloat(b.amount), 0);
+  const total = filtered.reduce((a,b) => a + parseFloat(b.amount), 0);
+
+  async function handleSave(payload) {
+    const user = (await sb.auth.getUser()).data.user;
+    if (modal.rec) {
+      const { data, error } = await sb.from('revenue').update({ ...payload, created_by: user.id }).eq('id', modal.rec.id).select().single();
+      if (error) { toast('Erro: ' + error.message, 'error'); return; }
+      if (data) setRevenue(prev => prev.map(r => r.id === data.id ? data : r));
+    } else {
+      const { data, error } = await sb.from('revenue').insert({ ...payload, created_by: user.id }).select().single();
+      if (error) { toast('Erro: ' + error.message, 'error'); return; }
+      if (data) setRevenue(prev => [data, ...prev]);
+    }
+    toast('Receita salva!', 'success');
+    setModal(null);
+    onRefresh();
+  }
+
+  async function handleDelete(id) {
+    const { error } = await sb.from('revenue').delete().eq('id', id);
+    if (error) { toast('Erro: ' + error.message, 'error'); return; }
+    setRevenue(prev => prev.filter(r => r.id !== id));
+    toast('Receita excluída.', 'info');
+    setConfirm(null);
+    onRefresh();
+  }
+
+  return (
+    <div className="page">
+      <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div className="page-title">Receitas</div>
+          <div className="page-subtitle">Registro de receitas operacionais e não operacionais</div>
+        </div>
+        <button className="btn btn-primary" onClick={() => setModal({ mode: 'new' })}>+ Nova Receita</button>
+      </div>
+
+      {/* Summary bar */}
+      <div className="weekly-summary" style={{ marginBottom: 16 }}>
+        <div>
+          <div className="weekly-stat-label">Total do Período</div>
+          <div className="weekly-stat-value pos">{fmtBRL(total)}</div>
+        </div>
+        <div>
+          <div className="weekly-stat-label">Operacional</div>
+          <div className="weekly-stat-value pos">{fmtBRL(totalOp)}</div>
+        </div>
+        <div>
+          <div className="weekly-stat-label">Não Operacional</div>
+          <div className="weekly-stat-value">{fmtBRL(totalNop)}</div>
+        </div>
+        <div>
+          <div className="weekly-stat-label">Registros</div>
+          <div className="weekly-stat-value">{filtered.length}</div>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="filters-bar">
+        <input className="form-control" type="date" value={filter.from} onChange={e => setFilter(p => ({ ...p, from: e.target.value }))} placeholder="De" />
+        <input className="form-control" type="date" value={filter.to} onChange={e => setFilter(p => ({ ...p, to: e.target.value }))} placeholder="Até" />
+        <select className="form-control" value={filter.type} onChange={e => setFilter(p => ({ ...p, type: e.target.value }))}>
+          <option value="todos">Todos os tipos</option>
+          <option value="operacional">Operacional</option>
+          <option value="nao_operacional">Não Operacional</option>
+        </select>
+        <select className="form-control" value={filter.cliente} onChange={e => setFilter(p => ({ ...p, cliente: e.target.value }))}>
+          <option value="">Todos os clientes</option>
+          <option value="Delivery próprio">Delivery próprio</option>
+          <option value="Ifood">Ifood</option>
+          <option value="Keeta">Keeta</option>
+          <option value="99Food">99Food</option>
+          <option value="Rappi">Rappi</option>
+          <option value="Outros">Outros</option>
+        </select>
+        <button className="btn btn-ghost btn-sm" onClick={() => setFilter({ type: 'todos', from: '', to: '', cliente: '' })}>Limpar</button>
+      </div>
+
+      {/* Table */}
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Cliente</th>
+              <th>Tipo</th>
+              <th>Valor</th>
+              <th>Observações</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr><td colSpan={5} style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>
+                Nenhuma receita registrada. Clique em "+ Nova Receita" para começar.
+              </td></tr>
+            ) : filtered.map(r => (
+              <tr key={r.id}>
+                <td style={{ fontWeight: 600 }}>{r.date ? fmtDate(r.date) : getFullMonthLabel(r.month)}</td>
+                <td style={{ fontSize: 12 }}>{r.cliente || '—'}</td>
+                <td>
+                  <span className="badge" style={{
+                    background: r.tipo === 'nao_operacional' ? '#f0f0f0' : '#e8f5e9',
+                    color: r.tipo === 'nao_operacional' ? '#555' : '#1b5e20'
+                  }}>
+                    {r.tipo === 'nao_operacional' ? 'Não Operacional' : 'Operacional'}
+                  </span>
+                </td>
+                <td className="mono" style={{ fontWeight: 600, color: 'var(--success)' }}>{fmtBRL(r.amount)}</td>
+                <td style={{ fontSize: 12, color: 'var(--muted)', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.notes || '—'}</td>
+                <td>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button className="btn btn-ghost btn-sm" onClick={() => setModal({ mode: 'edit', rec: r })}>✎</button>
+                    <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => setConfirm(r)}>✕</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Modal */}
+      {modal && (
+        <ReceitaModal
+          rec={modal.rec}
+          onSave={handleSave}
+          onClose={() => setModal(null)}
+        />
+      )}
+
+      {/* Confirm delete */}
+      {confirm && (
+        <ConfirmDialog
+          title="Excluir Receita"
+          msg={`Deseja excluir a receita de ${fmtBRL(confirm.amount)} de ${confirm.date ? fmtDate(confirm.date) : getFullMonthLabel(confirm.month)}? Esta ação não pode ser desfeita.`}
+          onConfirm={() => handleDelete(confirm.id)}
+          onCancel={() => setConfirm(null)}
+        />
+      )}
+
+      <button className="fab" onClick={() => setModal({ mode: 'new' })} title="Nova Receita">+</button>
+    </div>
+  );
+}
+
+function ReceitaModal({ rec, onSave, onClose }) {
+  const [form, setForm] = useState({
+    date: rec?.date || todayISO(),
+    tipo: rec?.tipo || 'operacional',
+    cliente: rec?.cliente || '',
+    amount: rec ? rec.amount.toString().replace('.', ',') : '',
+    notes: rec?.notes || '',
+  });
+  const [saving, setSaving] = useState(false);
+
+  function set(k, v) { setForm(p => ({ ...p, [k]: v })); }
+
+  async function handleSave() {
+    if (!form.date || !form.amount) { toast('Preencha data e valor.', 'error'); return; }
+    setSaving(true);
+    await onSave({
+      date: form.date,
+      month: form.date.slice(0, 7),
+      tipo: form.tipo,
+      cliente: form.cliente || null,
+      amount: parseBRLInput(form.amount),
+      notes: form.notes || null,
+    });
+    setSaving(false);
+  }
+
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{ maxWidth: 440 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">{rec ? 'Editar Receita' : 'Nova Receita'}</div>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          <div className="form-grid">
+            <div className="form-group">
+              <label className="form-label">Data *</label>
+              <input className="form-control" type="date" value={form.date} onChange={e => set('date', e.target.value)} autoFocus />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Tipo *</label>
+              <select className="form-control" value={form.tipo} onChange={e => set('tipo', e.target.value)}>
+                <option value="operacional">Operacional</option>
+                <option value="nao_operacional">Não Operacional</option>
+              </select>
+            </div>
+            <div className="form-group full">
+              <label className="form-label">Cliente</label>
+              <select className="form-control" value={form.cliente} onChange={e => set('cliente', e.target.value)}>
+                <option value="">Selecionar...</option>
+                <option value="Delivery próprio">Delivery próprio</option>
+                <option value="Ifood">Ifood</option>
+                <option value="Keeta">Keeta</option>
+                <option value="99Food">99Food</option>
+                <option value="Rappi">Rappi</option>
+                <option value="Outros">Outros</option>
+              </select>
+            </div>
+            <div className="form-group full">
+              <label className="form-label">Valor (R$) *</label>
+              <input className="form-control mono" value={form.amount} onChange={e => set('amount', e.target.value)} placeholder="0,00" />
+            </div>
+            <div className="form-group full">
+              <label className="form-label">Observações</label>
+              <textarea className="form-control" rows={2} value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="Ex: Vendas do dia, receita de aluguel..." style={{ resize: 'vertical' }} />
+            </div>
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? 'Salvando...' : 'Salvar Receita'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /* ═══════════════════════════════════════════════════════
    INSUMOS — Gastos por Categoria de Item
@@ -3168,6 +3468,7 @@ function App() {
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: '◈' },
     { id: 'contas', label: 'Contas a Pagar', icon: '◎', badge: overdueCount > 0 ? overdueCount : null },
+    { id: 'receitas', label: 'Receitas', icon: '◐' },
     { id: 'fornecedores', label: 'Fornecedores', icon: '◉' },
     { id: 'fluxo', label: 'Fluxo de Caixa', icon: '◆' },
     ...(isOwner ? [{ id: 'relatorios', label: 'Relatórios', icon: '◇' }] : []),
@@ -3227,6 +3528,14 @@ function App() {
             revenue={revenue}
             onRefresh={() => loadAll(sessionRef.current, true)}
             isOwner={isOwner}
+          />
+        )}
+        {page === 'receitas' && (
+          <Receitas
+            revenue={revenue}
+            setRevenue={setRevenue}
+            onRefresh={() => loadAll(sessionRef.current, true)}
+            session={session}
           />
         )}
         {page === 'fornecedores' && (
