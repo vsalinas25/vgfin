@@ -1550,12 +1550,9 @@ function Dashboard({ expenses, revenue, showModal, onRefresh, session }) {
 
   return (
     <div className="page">
-      <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-        <div>
-          <div className="page-title">Dashboard</div>
-          <div className="page-subtitle">{getFullMonthLabel(currentMonth)}</div>
-        </div>
-        <button className="btn btn-primary" onClick={() => setRevenueModal(true)}>+ Nova Receita</button>
+      <div className="page-header">
+        <div className="page-title">Dashboard</div>
+        <div className="page-subtitle">{getFullMonthLabel(currentMonth)}</div>
       </div>
 
       <div className="metrics-grid">
@@ -1577,7 +1574,7 @@ function Dashboard({ expenses, revenue, showModal, onRefresh, session }) {
         </div>
       </div>
 
-      <div className="metrics-grid metrics-grid-2">
+      <div className="metrics-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
         <div className="metric-card">
           <div className="metric-label">YTD Receita</div>
           <div className="metric-value green">{fmtBRL(ytdRev)}</div>
@@ -1589,6 +1586,13 @@ function Dashboard({ expenses, revenue, showModal, onRefresh, session }) {
         <div className="metric-card">
           <div className="metric-label">YTD Resultado</div>
           <div className={`metric-value ${ytdResult >= 0 ? 'positive' : 'negative'}`}>{fmtBRLSigned(ytdResult)}</div>
+        </div>
+        <div className="metric-card">
+          <div className="metric-label">Margem de Lucro (Mês)</div>
+          <div className={`metric-value ${monthResult >= 0 ? 'positive' : 'negative'}`} style={{ fontSize: 26 }}>
+            {monthRevenue > 0 ? (monthResult / monthRevenue * 100).toFixed(1) + '%' : '—'}
+          </div>
+          <div className="metric-sub">{monthRevenue > 0 ? `${fmtBRLSigned(monthResult)} sobre ${fmtBRL(monthRevenue)}` : 'Sem receita registrada'}</div>
         </div>
       </div>
 
@@ -1946,10 +1950,15 @@ function Fornecedores({ suppliers, expenses, onRefresh, isOwner }) {
   });
 
   function supplierStats(sid) {
-    const exps = expenses.filter(e => e.supplier_id === sid || e.supplier_name === (suppliers.find(s=>s.id===sid)||{}).name);
-    const total = exps.reduce((a,b) => a + b.amount, 0);
-    const last = exps.sort((a,b) => b.due_date.localeCompare(a.due_date))[0];
-    return { total, last: last?.due_date };
+    const supplier = suppliers.find(s => s.id === sid);
+    const sname = supplier?.name || '';
+    const exps = expenses.filter(e =>
+      e.supplier_id === sid ||
+      (sname && e.supplier_name?.toLowerCase() === sname.toLowerCase())
+    );
+    const total = exps.reduce((a,b) => a + (parseFloat(b.amount) || 0), 0);
+    const sorted = [...exps].sort((a,b) => b.due_date.localeCompare(a.due_date));
+    return { total, last: sorted[0]?.due_date, count: exps.length };
   }
 
   async function handleSave(form) {
@@ -1996,7 +2005,7 @@ function Fornecedores({ suppliers, expenses, onRefresh, isOwner }) {
       {view === 'card' ? (
         <div className="card-grid">
           {filtered.map(s => {
-            const { total, last } = supplierStats(s.id);
+            const { total, last, count } = supplierStats(s.id);
             return (
               <div key={s.id} className="supplier-card" onClick={() => setPanel(s)}>
                 <div className="supplier-card-name">{s.name}</div>
@@ -2004,6 +2013,7 @@ function Fornecedores({ suppliers, expenses, onRefresh, isOwner }) {
                 <div className="supplier-card-stats">
                   <div className="supplier-stat"><strong>{fmtBRL(total)}</strong>Total gasto</div>
                   <div className="supplier-stat"><strong>{last ? fmtDate(last) : '—'}</strong>Última compra</div>
+                  <div className="supplier-stat"><strong>{count}</strong>Compras</div>
                 </div>
               </div>
             );
@@ -2019,7 +2029,7 @@ function Fornecedores({ suppliers, expenses, onRefresh, isOwner }) {
             </thead>
             <tbody>
               {filtered.map(s => {
-                const { total, last } = supplierStats(s.id);
+                const { total, last, count } = supplierStats(s.id);
                 return (
                   <tr key={s.id}>
                     <td><strong>{s.name}</strong></td>
@@ -2222,10 +2232,14 @@ function FluxoDeCaixa({ expenses, revenue, onRefresh }) {
   });
 
   function getRevenue(ym) {
-    return revenue.filter(r => r.month === ym).reduce((a,b) => a+b.amount, 0);
+    return revenue.filter(r => {
+      // Support both date-based and month-based entries
+      if (r.date) return r.date.startsWith(ym);
+      return r.month === ym;
+    }).reduce((a,b) => a + (parseFloat(b.amount) || 0), 0);
   }
   function getExpenses(ym) {
-    return expenses.filter(e => e.due_date.startsWith(ym) && e.status === 'pago').reduce((a,b) => a+b.amount, 0);
+    return expenses.filter(e => e.due_date.startsWith(ym) && e.status === 'pago').reduce((a,b) => a + (parseFloat(b.amount) || 0), 0);
   }
 
   let cumulative = 0;
