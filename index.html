@@ -1172,8 +1172,18 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
   const [saving, setSaving] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [nfReading, setNfReading] = useState(false);
-  const [nfItems, setNfItems] = useState(null); // items extracted from NF
-  const [nfFileName, setNfFileName] = useState('');
+  const [nfItems, setNfItems] = useState(() => {
+    if (expense) return null;
+    try {
+      const saved = sessionStorage.getItem('vg_nf_items');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return null;
+  });
+  const [nfFileName, setNfFileName] = useState(() => {
+    if (expense) return '';
+    try { return sessionStorage.getItem('vg_nf_filename') || ''; } catch { return ''; }
+  });
   const fileInputRef = useRef(null);
 
   // Auto-save draft on every keystroke (new expenses only)
@@ -1182,6 +1192,29 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
       try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(form)); } catch {}
     }
   }, [form]);
+
+  // Save nfItems to sessionStorage whenever they change
+  useEffect(() => {
+    if (!expense) {
+      try {
+        if (nfItems !== null) {
+          sessionStorage.setItem('vg_nf_items', JSON.stringify(nfItems));
+        } else {
+          sessionStorage.removeItem('vg_nf_items');
+        }
+      } catch {}
+    }
+  }, [nfItems]);
+
+  // Save nfFileName to sessionStorage
+  useEffect(() => {
+    if (!expense) {
+      try {
+        if (nfFileName) sessionStorage.setItem('vg_nf_filename', nfFileName);
+        else sessionStorage.removeItem('vg_nf_filename');
+      } catch {}
+    }
+  }, [nfFileName]);
 
   const filtered = suppliers.filter(s =>
     form.supplier_name && s.name.toLowerCase().includes(form.supplier_name.toLowerCase())
@@ -1266,7 +1299,11 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
       week_range: form.week_range || null,
       notes: form.notes || null,
     };
-    try { sessionStorage.removeItem(DRAFT_KEY); } catch {}
+    try {
+      sessionStorage.removeItem(DRAFT_KEY);
+      sessionStorage.removeItem('vg_nf_items');
+      sessionStorage.removeItem('vg_nf_filename');
+    } catch {}
     const savedExpense = await onSave(payload, nfItems);
     setSaving(false);
   }
@@ -1278,7 +1315,12 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
   }, []);
 
   function handleClose() {
-    try { sessionStorage.removeItem(DRAFT_KEY); sessionStorage.removeItem('vg_modal_state'); } catch {}
+    try {
+      sessionStorage.removeItem(DRAFT_KEY);
+      sessionStorage.removeItem('vg_modal_state');
+      sessionStorage.removeItem('vg_nf_items');
+      sessionStorage.removeItem('vg_nf_filename');
+    } catch {}
     onClose();
   }
 
