@@ -605,6 +605,112 @@ canvas { max-width: 100%; }
   .page { padding: 20px 16px; }
 }
 
+/* ── MOBILE ───────────────────────────────────────────── */
+@media (max-width: 600px) {
+  :root { --sidebar-w: 0px; --sidebar-collapsed: 52px; }
+
+  .app { flex-direction: column; }
+
+  /* Bottom navigation on mobile */
+  .sidebar {
+    width: 100% !important;
+    height: 56px;
+    flex-direction: row;
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    top: auto;
+    z-index: 200;
+    overflow: hidden;
+    border-top: 1px solid #1a1a1a;
+  }
+  .sidebar-brand { display: none; }
+  .sidebar-nav {
+    display: flex;
+    flex-direction: row;
+    padding: 0;
+    flex: 1;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .nav-item {
+    flex-direction: column;
+    padding: 6px 8px;
+    font-size: 9px;
+    gap: 2px;
+    border-left: none;
+    border-top: 3px solid transparent;
+    min-width: 52px;
+    justify-content: center;
+    align-items: center;
+    white-space: nowrap;
+  }
+  .nav-item span { display: block !important; font-size: 9px; }
+  .nav-item.active { border-left: none; border-top-color: var(--green); }
+  .nav-icon { font-size: 18px; width: auto; }
+  .nav-badge {
+    display: flex !important;
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    font-size: 8px;
+    padding: 1px 4px;
+    min-width: 14px;
+  }
+  .sidebar-divider { display: none; }
+  .sidebar-user { display: none; }
+
+  /* Content area */
+  .content {
+    margin-bottom: 56px;
+    width: 100%;
+  }
+  .page { padding: 16px 12px; }
+
+  /* Metrics — single column on very small screens */
+  .metrics-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .metric-card { padding: 14px 12px; }
+  .metric-value { font-size: 16px; }
+  .metric-label { font-size: 9px; }
+
+  /* Table horizontal scroll */
+  .table-wrap { overflow-x: auto; }
+  .table-wrap table { min-width: 600px; }
+
+  /* Modal full screen on mobile */
+  .modal-overlay { align-items: flex-end; }
+  .modal-box { border-radius: 12px 12px 0 0; max-height: 95vh; }
+
+  /* FAB above bottom nav */
+  .fab { bottom: 72px; right: 16px; }
+
+  /* Sync indicator */
+  .sync-indicator { bottom: 64px; }
+
+  /* Page header */
+  .page-header { margin-bottom: 16px; }
+  .page-title { font-size: 20px; }
+
+  /* Filters bar */
+  .filters-bar { gap: 6px; }
+  .filters-bar .form-control { min-width: 100px; font-size: 12px; }
+
+  /* Weekly summary */
+  .weekly-summary { gap: 16px; padding: 14px 16px; flex-wrap: wrap; }
+  .weekly-stat-value { font-size: 14px; }
+
+  /* Card grid */
+  .card-grid { grid-template-columns: 1fr; }
+
+  /* Side panel full width */
+  .side-panel { width: 100%; }
+
+  /* Charts */
+  .chart-card { padding: 16px 12px; }
+
+  /* Offline banner */
+  .offline-banner { padding: 8px 16px; font-size: 11px; }
+}
+
 /* ── NF UPLOAD & ITEMS ───────────────────────────────── */
 .nf-upload-zone {
   border: 2px dashed var(--border); border-radius: var(--radius);
