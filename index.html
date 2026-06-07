@@ -5172,13 +5172,32 @@ function App() {
         <ExpenseModal
           expense={null}
           suppliers={suppliers}
-          onSave={async (payload) => {
+          onSave={async (payload, nfItems) => {
             const user = (await sb.auth.getUser()).data.user;
-            const { error } = await sb.from('expenses').insert({ ...payload, created_by: user.id });
+            const { data, error } = await sb.from('expenses').insert({ ...payload, created_by: user.id }).select().single();
             if (error) { toast('Erro: ' + error.message, 'error'); return; }
-            toast('Despesa salva!', 'success');
+
+            // Save NF items if present
+            if (nfItems && nfItems.length > 0 && data) {
+              const itemsPayload = nfItems.map(item => ({
+                expense_id: data.id,
+                description: item.description,
+                quantity: parseFloat(item.quantity) || 1,
+                unit: item.unit || null,
+                unit_price: parseFloat(item.unit_price) || null,
+                total: parseFloat(item.total) || 0,
+                category: item.category || 'Outros',
+                ncm: item.ncm || null,
+              }));
+              const { error: itemsError } = await sb.from('expense_items').insert(itemsPayload);
+              if (itemsError) toast('Despesa salva, mas erro nos itens: ' + itemsError.message, 'error');
+              else toast(`Despesa + ${nfItems.length} itens salvos!`, 'success');
+            } else {
+              toast('Despesa salva!', 'success');
+            }
+
             setQuickModal(null);
-            loadAll(session);
+            loadAll(sessionRef.current, true);
           }}
           onClose={() => setQuickModal(null)}
         />
