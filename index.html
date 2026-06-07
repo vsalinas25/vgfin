@@ -4,6 +4,11 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="theme-color" content="#000000" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black" />
+<meta name="apple-mobile-web-app-title" content="VG Finanças" />
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23000'/><text y='.9em' font-size='80' x='10'>💰</text></svg>" />
+<link rel="manifest" href="data:application/json,{&quot;name&quot;:&quot;Vitto %26 Giulio Gestão Financeira&quot;,&quot;short_name&quot;:&quot;VG Finanças&quot;,&quot;start_url&quot;:&quot;./&quot;,&quot;display&quot;:&quot;standalone&quot;,&quot;background_color&quot;:&quot;%23efe9e0&quot;,&quot;theme_color&quot;:&quot;%23000000&quot;,&quot;icons&quot;:[{&quot;src&quot;:&quot;data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23000'/><text y='.9em' font-size='80' x='10'>💰</text></svg>&quot;,&quot;sizes&quot;:&quot;192x192&quot;,&quot;type&quot;:&quot;image/svg+xml&quot;}]}" />
 <title>Vitto &amp; Giulio — Gestão Financeira</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -13,6 +18,7 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 <style>
 :root {
   --black: #000000;
@@ -729,6 +735,48 @@ function fmtDate(d) {
 function todayISO() {
   return new Date().toISOString().split('T')[0];
 }
+
+// Get Monday of the week containing a given date
+function getMondayOfWeek(dateISO) {
+  const d = new Date(dateISO + 'T00:00:00');
+  const day = d.getDay(); // 0=Sun, 1=Mon...
+  const diff = day === 0 ? -6 : 1 - day; // adjust to Monday
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().split('T')[0];
+}
+
+// Get Sunday of the week containing a given date
+function getSundayOfWeek(dateISO) {
+  const monday = getMondayOfWeek(dateISO);
+  const d = new Date(monday + 'T00:00:00');
+  d.setDate(d.getDate() + 6);
+  return d.toISOString().split('T')[0];
+}
+
+// Format week range label: "02/06 – 08/06"
+function fmtWeekRange(mondayISO) {
+  const sunday = getSundayOfWeek(mondayISO);
+  const fmt = (iso) => {
+    const [,m,d] = iso.split('-');
+    return d + '/' + m;
+  };
+  return fmt(mondayISO) + ' – ' + fmt(sunday);
+}
+
+// Generate list of week options (last 8 weeks + next 4)
+function getWeekOptions(anchorISO) {
+  const anchor = anchorISO || todayISO();
+  const monday = getMondayOfWeek(anchor);
+  const d = new Date(monday + 'T00:00:00');
+  d.setDate(d.getDate() - 7 * 8); // go back 8 weeks
+  const weeks = [];
+  for (let i = 0; i < 13; i++) {
+    const iso = d.toISOString().split('T')[0];
+    weeks.push(iso);
+    d.setDate(d.getDate() + 7);
+  }
+  return weeks;
+}
 function monthISO(d = new Date()) {
   return d.toISOString().slice(0,7);
 }
@@ -1082,7 +1130,7 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
     expense_type: '', amount: '', due_date: todayISO(),
     payment_method: '', status: 'pendente',
     paid_date: '', recurring: false, frequency: '',
-    week_range: '', notes: '',
+    week_range: fmtWeekRange(getMondayOfWeek(todayISO())), notes: '',
   };
 
   function getInitial() {
@@ -1120,6 +1168,7 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
   }
 
   const [form, setForm] = useState(getInitial);
+  const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [nfReading, setNfReading] = useState(false);
@@ -1138,7 +1187,16 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
     form.supplier_name && s.name.toLowerCase().includes(form.supplier_name.toLowerCase())
   );
 
-  function set(k, v) { setForm(p => ({ ...p, [k]: v })); }
+  function set(k, v) {
+    if (errors[k]) setErrors(p => { const n = {...p}; delete n[k]; return n; });
+    setForm(p => {
+      const updated = { ...p, [k]: v };
+      if (k === 'due_date' && v && !p.week_range) {
+        updated.week_range = fmtWeekRange(getMondayOfWeek(v));
+      }
+      return updated;
+    });
+  }
 
   async function handleNFUpload(file) {
     const isPdf = file.type === 'application/pdf';
@@ -1159,17 +1217,21 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
 
       const result = await readNFWithClaude(base64, file.type);
 
-      // Auto-fill form fields
-      if (result.supplier_name) set('supplier_name', result.supplier_name);
-      if (result.amount) set('amount', result.amount.toFixed(2).replace('.', ','));
-      if (result.due_date) set('due_date', result.due_date);
-      if (result.notes) set('notes', result.notes);
+      // Auto-fill all form fields in a single setForm call to avoid race conditions
+      setForm(prev => ({
+        ...prev,
+        supplier_name: result.supplier_name || prev.supplier_name,
+        amount: result.amount ? result.amount.toFixed(2).replace('.', ',') : prev.amount,
+        due_date: result.due_date || prev.due_date,
+        notes: result.notes || prev.notes,
+      }));
 
-      // Store items for saving after expense is created
+      // Set items after form update
       if (result.items && result.items.length > 0) {
-        setNfItems(result.items);
+        setNfItems([...result.items]);
         toast(`NF lida com sucesso! ${result.items.length} itens encontrados.`, 'success');
       } else {
+        setNfItems([]);
         toast('NF lida! Nenhum item encontrado — verifique o PDF.', 'info');
       }
     } catch (err) {
@@ -1180,9 +1242,17 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
   }
 
   async function handleSave() {
-    if (!form.supplier_name || !form.category || !form.amount || !form.due_date) {
-      toast('Preencha os campos obrigatórios.', 'error'); return;
+    const newErrors = {};
+    if (!form.supplier_name) newErrors.supplier_name = true;
+    if (!form.category) newErrors.category = true;
+    if (!form.amount) newErrors.amount = true;
+    if (!form.due_date) newErrors.due_date = true;
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      toast('Preencha os campos destacados em vermelho.', 'error');
+      return;
     }
+    setErrors({});
     setSaving(true);
     const { payment_details: _pd, ...formClean } = form;
     const payload = {
@@ -1228,7 +1298,7 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
                   <div className="nf-spinner" />
                   <span>Lendo Nota Fiscal com IA... aguarde.</span>
                 </div>
-              ) : nfItems ? (
+              ) : nfItems !== null ? (
                 <div style={{ background: '#f0fff4', border: '1px solid var(--green)', borderRadius: 'var(--radius)', padding: '10px 14px', fontSize: 13 }}>
                   <span style={{ color: 'var(--green)', fontWeight: 600 }}>✓ NF lida:</span> {nfFileName} · <strong>{nfItems.length} itens</strong> extraídos
                   <button className="btn btn-ghost btn-sm" style={{ marginLeft: 10 }} onClick={() => { setNfItems(null); setNfFileName(''); }}>✕ Remover</button>
@@ -1252,11 +1322,13 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
               <label className="form-label">Fornecedor *</label>
               <input
                 className="form-control"
+                style={errors.supplier_name ? { borderColor: 'var(--danger)', background: '#fff8f8' } : {}}
                 value={form.supplier_name}
                 onChange={e => { set('supplier_name', e.target.value); set('supplier_id', ''); setShowSuggestions(true); }}
                 onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
                 placeholder="Nome do fornecedor"
               />
+              {errors.supplier_name && <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 3 }}>Campo obrigatório</div>}
               {showSuggestions && filtered.length > 0 && (
                 <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid var(--border)', borderTop: 'none', zIndex: 10, borderRadius: '0 0 3px 3px', maxHeight: 160, overflowY: 'auto' }}>
                   {filtered.map(s => (
@@ -1271,10 +1343,16 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
 
             <div className="form-group">
               <label className="form-label">Categoria *</label>
-              <select className="form-control" value={form.category} onChange={e => set('category', e.target.value)}>
+              <select
+                className="form-control"
+                style={errors.category ? { borderColor: 'var(--danger)', background: '#fff8f8' } : {}}
+                value={form.category}
+                onChange={e => set('category', e.target.value)}
+              >
                 <option value="">Selecionar...</option>
                 {CATEGORIES.map(c => <option key={c}>{c}</option>)}
               </select>
+              {errors.category && <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 3 }}>Campo obrigatório</div>}
             </div>
 
             <div className="form-group">
@@ -1284,12 +1362,26 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
 
             <div className="form-group">
               <label className="form-label">Valor (R$) *</label>
-              <input className="form-control mono" value={form.amount} onChange={e => set('amount', e.target.value)} placeholder="0,00" />
+              <input
+                className="form-control mono"
+                style={errors.amount ? { borderColor: 'var(--danger)', background: '#fff8f8' } : {}}
+                value={form.amount}
+                onChange={e => set('amount', e.target.value)}
+                placeholder="0,00"
+              />
+              {errors.amount && <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 3 }}>Campo obrigatório</div>}
             </div>
 
             <div className="form-group">
               <label className="form-label">Vencimento *</label>
-              <input className="form-control" type="date" value={form.due_date} onChange={e => set('due_date', e.target.value)} />
+              <input
+                className="form-control"
+                type="date"
+                style={errors.due_date ? { borderColor: 'var(--danger)', background: '#fff8f8' } : {}}
+                value={form.due_date}
+                onChange={e => set('due_date', e.target.value)}
+              />
+              {errors.due_date && <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 3 }}>Campo obrigatório</div>}
             </div>
 
             <div className="form-group">
@@ -1312,7 +1404,14 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
 
             <div className="form-group">
               <label className="form-label">Semana</label>
-              <input className="form-control" value={form.week_range} onChange={e => set('week_range', e.target.value)} placeholder="Ex: 05/01 - 11/01" />
+              <select className="form-control" value={form.week_range} onChange={e => set('week_range', e.target.value)}>
+                <option value="">Selecionar semana...</option>
+                {getWeekOptions(form.due_date).map(monday => (
+                  <option key={monday} value={fmtWeekRange(monday)}>
+                    {fmtWeekRange(monday)}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="form-group full">
@@ -1471,7 +1570,7 @@ function RevenueModal({ revenue, onSave, onClose }) {
   );
 }
 
-function Dashboard({ expenses, revenue, showModal, onRefresh, session }) {
+function Dashboard({ expenses, revenue, showModal, onRefresh, session, pendingRequests, pendingReceivables }) {
   const now = new Date();
   const currentMonth = monthISO(now);
   const chartRef = useRef(null);
@@ -1493,20 +1592,28 @@ function Dashboard({ expenses, revenue, showModal, onRefresh, session }) {
     onRefresh();
   }
 
+  function revForPeriod(prefix) {
+    return revenue.filter(r => {
+      const key = r.date ? r.date : (r.month + '-01');
+      return key.startsWith(prefix);
+    }).reduce((a,b) => a + (parseFloat(b.amount) || 0), 0);
+  }
+
   const monthExpenses = expenses.filter(e => e.due_date.startsWith(currentMonth));
-  const monthRevenue = revenue.filter(r => r.month === currentMonth).reduce((a, b) => a + b.amount, 0);
-  const monthPaid = monthExpenses.reduce((a, b) => a + b.amount, 0);
+  const monthRevenue = revForPeriod(currentMonth);
+  const monthPaid = monthExpenses.reduce((a,b) => a + (parseFloat(b.amount) || 0), 0);
   const monthResult = monthRevenue - monthPaid;
 
   const ytdPrefix = now.getFullYear().toString();
   const ytdExp = expenses.filter(e => e.due_date.startsWith(ytdPrefix));
-  const ytdRev = revenue.filter(r => r.month.startsWith(ytdPrefix)).reduce((a,b) => a + b.amount, 0);
-  const ytdExpTotal = ytdExp.reduce((a,b) => a + b.amount, 0);
+  const ytdRev = revForPeriod(ytdPrefix);
+  const ytdExpTotal = ytdExp.reduce((a,b) => a + (parseFloat(b.amount) || 0), 0);
   const ytdResult = ytdRev - ytdExpTotal;
 
-  const allPaid = expenses.reduce((a,b) => a + b.amount, 0);
-  const allRev = revenue.reduce((a,b) => a + b.amount, 0);
-  const balance = allRev - allPaid;
+  const allRev = revenue.reduce((a,b) => a + (parseFloat(b.amount) || 0), 0);
+  const allPaid = expenses.reduce((a,b) => a + (parseFloat(b.amount) || 0), 0);
+  const saldoInicial = parseFloat(localStorage.getItem('vg_saldo_inicial') || '0');
+  const balance = saldoInicial + allRev - allPaid;
 
   const today = todayISO();
   const in7days = new Date(); in7days.setDate(in7days.getDate() + 7);
@@ -1554,6 +1661,17 @@ function Dashboard({ expenses, revenue, showModal, onRefresh, session }) {
         <div className="page-title">Dashboard</div>
         <div className="page-subtitle">{getFullMonthLabel(currentMonth)}</div>
       </div>
+
+      {pendingRequests > 0 && (
+        <div style={{ background:'#fff3e0',border:'1px solid var(--warning)',borderRadius:'var(--radius)',padding:'10px 16px',marginBottom:16,fontSize:13,fontWeight:600 }}>
+          ⏳ {pendingRequests} solicitação{pendingRequests>1?'ões':''} de despesa aguardando sua aprovação
+        </div>
+      )}
+      {pendingReceivables && pendingReceivables.length > 0 && (
+        <div style={{ background:'#f0fff4',border:'1px solid var(--green)',borderRadius:'var(--radius)',padding:'10px 16px',marginBottom:16,fontSize:13,fontWeight:600,color:'#0d4a1f' }}>
+          💰 {fmtBRL(pendingReceivables.reduce((a,b)=>a+parseFloat(b.amount),0))} a receber de {pendingReceivables.length} entrega{pendingReceivables.length>1?'s':''}
+        </div>
+      )}
 
       <div className="metrics-grid">
         <div className="metric-card">
@@ -1617,7 +1735,7 @@ function Dashboard({ expenses, revenue, showModal, onRefresh, session }) {
               {isOverdue(e.due_date, e.status) ? '⚠ Vencido ' : ''}{fmtDate(e.due_date)}
             </div>
             <div style={{ fontSize: 11, color: 'var(--muted)' }}>{e.payment_method || '—'}</div>
-            <button className="btn btn-primary btn-sm" onClick={() => showModal('pay', e)}>Pagar</button>
+            <button className="btn btn-primary btn-sm" onClick={() => showModal('pay', e)}>✓ Pagar</button>
           </div>
         ))}
       </div>
@@ -1634,13 +1752,72 @@ function Dashboard({ expenses, revenue, showModal, onRefresh, session }) {
   );
 }
 
+
+/* ═══════════════════════════════════════════════════════
+   PAGAR MODAL — confirm payment with editable date
+═══════════════════════════════════════════════════════ */
+function PagarModal({ expense, onConfirm, onClose }) {
+  const [paidDate, setPaidDate] = useState(todayISO());
+  const [saving, setSaving] = useState(false);
+
+  async function handleConfirm() {
+    setSaving(true);
+    await onConfirm(expense, paidDate);
+    setSaving(false);
+  }
+
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">Confirmar Pagamento</div>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontWeight: 600, fontSize: 15 }}>{expense.supplier_name}</div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 22, fontWeight: 700, color: 'var(--success)', margin: '8px 0' }}>{fmtBRL(expense.amount)}</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>{expense.category}{expense.expense_type ? ' · ' + expense.expense_type : ''}</div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Data do Pagamento *</label>
+            <input
+              className="form-control"
+              type="date"
+              value={paidDate}
+              onChange={e => setPaidDate(e.target.value)}
+              autoFocus
+            />
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+              Altere se o pagamento foi realizado em outra data.
+            </div>
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+          <button className="btn btn-primary" onClick={handleConfirm} disabled={saving || !paidDate}>
+            {saving ? 'Registrando...' : '✓ Confirmar Pagamento'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════
    MODULE 2 — CONTAS A PAGAR
 ═══════════════════════════════════════════════════════ */
 function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isOwner }) {
-  const [filter, setFilter] = useState({ status: 'todos', category: '', search: '', from: '', to: '' });
+  const [filter, setFilter] = useState({ status: 'todos', category: '', search: '', from: '', to: '', week: '' });
   const [itemsModal, setItemsModal] = useState(null);
   const [codigoModal, setCodigoModal] = useState(null);
+  const [pagarModal, setPagarModal] = useState(null);
   const [modal, setModal] = useState(() => {
     try {
       const saved = sessionStorage.getItem('vg_modal_state');
@@ -1672,6 +1849,7 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
       if (filter.search && !e.supplier_name.toLowerCase().includes(filter.search.toLowerCase())) return false;
       if (filter.from && e.due_date < filter.from) return false;
       if (filter.to && e.due_date > filter.to) return false;
+      if (filter.week && e.week_range !== filter.week) return false;
       return true;
     }).sort((a, b) => {
       const aOv = isOverdue(a.due_date, a.status);
@@ -1729,16 +1907,17 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
     return savedExpense;
   }
 
-  async function markPaid(exp) {
-    // Optimistic update first
-    setExpenses(prev => prev.map(e => e.id === exp.id ? { ...e, status: 'pago', paid_date: todayISO() } : e));
-    const { error } = await sb.from('expenses').update({ status: 'pago', paid_date: todayISO() }).eq('id', exp.id);
+  async function markPaid(exp, paidDate) {
+    const date = paidDate || todayISO();
+    setExpenses(prev => prev.map(e => e.id === exp.id ? { ...e, status: 'pago', paid_date: date } : e));
+    const { error } = await sb.from('expenses').update({ status: 'pago', paid_date: date }).eq('id', exp.id);
     if (error) {
       toast('Erro: ' + error.message, 'error');
-      onRefresh(); // revert
+      onRefresh();
       return;
     }
     toast('Marcado como pago!', 'success');
+    setPagarModal(null);
     onRefresh();
   }
 
@@ -1805,7 +1984,13 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
         </select>
         <input className="form-control" type="date" value={filter.from} onChange={e => setFilter(p=>({...p,from:e.target.value}))} placeholder="De" />
         <input className="form-control" type="date" value={filter.to} onChange={e => setFilter(p=>({...p,to:e.target.value}))} placeholder="Até" />
-        <button className="btn btn-ghost btn-sm" onClick={() => setFilter({ status:'todos',category:'',search:'',from:'',to:'' })}>Limpar</button>
+        <select className="form-control" value={filter.week} onChange={e => setFilter(p=>({...p,week:e.target.value}))}>
+          <option value="">Todas as semanas</option>
+          {getWeekOptions(todayISO()).map(monday => (
+            <option key={monday} value={fmtWeekRange(monday)}>{fmtWeekRange(monday)}</option>
+          ))}
+        </select>
+        <button className="btn btn-ghost btn-sm" onClick={() => setFilter({ status:'todos',category:'',search:'',from:'',to:'',week:'' })}>Limpar</button>
       </div>
 
       <div className="table-wrap">
@@ -1847,7 +2032,7 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
                   <td>
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                       {e.status === 'pendente' ? (
-                        <button className="btn btn-primary btn-sm" onClick={() => markPaid(e)}>✓ Pagar</button>
+                        <button className="btn btn-primary btn-sm" onClick={() => setPagarModal(e)}>✓ Pagar</button>
                       ) : (
                         <button className="btn btn-ghost btn-sm" onClick={() => markPending(e)}>↩ Reabrir</button>
                       )}
@@ -1879,6 +2064,14 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
           msg={`Deseja excluir a despesa de ${fmtBRL(confirm.amount)} para ${confirm.supplier_name}? Esta ação não pode ser desfeita.`}
           onConfirm={() => handleDelete(confirm.id)}
           onCancel={() => setConfirm(null)}
+        />
+      )}
+
+      {pagarModal && (
+        <PagarModal
+          expense={pagarModal}
+          onConfirm={(exp, date) => markPaid(exp, date)}
+          onClose={() => setPagarModal(null)}
         />
       )}
 
@@ -2233,16 +2426,16 @@ function FluxoDeCaixa({ expenses, revenue, onRefresh }) {
 
   function getRevenue(ym) {
     return revenue.filter(r => {
-      // Support both date-based and month-based entries
-      if (r.date) return r.date.startsWith(ym);
-      return r.month === ym;
+      const key = r.date ? r.date : (r.month + '-01');
+      return key.startsWith(ym);
     }).reduce((a,b) => a + (parseFloat(b.amount) || 0), 0);
   }
   function getExpenses(ym) {
     return expenses.filter(e => e.due_date.startsWith(ym) && e.status === 'pago').reduce((a,b) => a + (parseFloat(b.amount) || 0), 0);
   }
 
-  let cumulative = 0;
+  const saldoInicialFC = parseFloat(localStorage.getItem('vg_saldo_inicial') || '0');
+  let cumulative = saldoInicialFC;
   const rows = months.map(ym => {
     const rev = editingRev[ym] !== undefined ? parseBRLInput(editingRev[ym]) : getRevenue(ym);
     const exp = getExpenses(ym);
@@ -2375,6 +2568,532 @@ function FluxoDeCaixa({ expenses, revenue, onRefresh }) {
 }
 
 
+
+
+/* ═══════════════════════════════════════════════════════
+   MODULE — RECEBIMENTOS (Contas a Receber)
+═══════════════════════════════════════════════════════ */
+function Recebimentos({ receivables, setReceivables, revenue, setRevenue, onRefresh }) {
+  const [modal, setModal] = useState(null);
+  const [confirm, setConfirm] = useState(null);
+  const [receberModal, setReceberModal] = useState(null);
+
+  const pending = receivables.filter(r => r.status === 'pendente').sort((a,b) => a.expected_date.localeCompare(b.expected_date));
+  const received = receivables.filter(r => r.status === 'recebido').sort((a,b) => b.received_date.localeCompare(a.received_date));
+
+  const totalPending = pending.reduce((a,b) => a + parseFloat(b.amount), 0);
+  const totalReceived = received.reduce((a,b) => a + parseFloat(b.amount), 0);
+
+  async function handleSave(payload) {
+    const user = (await sb.auth.getUser()).data.user;
+    if (modal.rec) {
+      const { data, error } = await sb.from('receivables').update({ ...payload, created_by: user.id }).eq('id', modal.rec.id).select().single();
+      if (error) { toast('Erro: ' + error.message, 'error'); return; }
+      if (data) setReceivables(prev => prev.map(r => r.id === data.id ? data : r));
+    } else {
+      const { data, error } = await sb.from('receivables').insert({ ...payload, created_by: user.id }).select().single();
+      if (error) { toast('Erro: ' + error.message, 'error'); return; }
+      if (data) setReceivables(prev => [...prev, data]);
+    }
+    toast('Salvo!', 'success');
+    setModal(null);
+  }
+
+  async function handleReceber(rec, receivedDate) {
+    // Mark as received
+    const { data, error } = await sb.from('receivables').update({ status: 'recebido', received_date: receivedDate }).eq('id', rec.id).select().single();
+    if (error) { toast('Erro: ' + error.message, 'error'); return; }
+    if (data) setReceivables(prev => prev.map(r => r.id === data.id ? data : r));
+
+    // Auto-create revenue entry
+    const user = (await sb.auth.getUser()).data.user;
+    const revPayload = {
+      date: receivedDate,
+      month: receivedDate.slice(0,7),
+      amount: rec.amount,
+      tipo: 'operacional',
+      cliente: rec.app,
+      notes: `Recebimento ${rec.app} · Previsto: ${fmtDate(rec.expected_date)}`,
+      created_by: user.id,
+    };
+    const { data: revData } = await sb.from('revenue').insert(revPayload).select().single();
+    if (revData) setRevenue(prev => [...prev, revData]);
+
+    toast('Recebimento registrado e receita lançada!', 'success');
+    setReceberModal(null);
+    onRefresh();
+  }
+
+  async function handleDelete(id) {
+    await sb.from('receivables').delete().eq('id', id);
+    setReceivables(prev => prev.filter(r => r.id !== id));
+    toast('Excluído.', 'info');
+    setConfirm(null);
+  }
+
+  const today = todayISO();
+
+  return (
+    <div className="page">
+      <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div className="page-title">A Receber</div>
+          <div className="page-subtitle">Recebimentos futuros das plataformas de delivery</div>
+        </div>
+        <button className="btn btn-primary" onClick={() => setModal({ mode: 'new' })}>+ Novo Recebimento</button>
+      </div>
+
+      <div className="weekly-summary" style={{ marginBottom: 16 }}>
+        <div>
+          <div className="weekly-stat-label">A Receber</div>
+          <div className="weekly-stat-value">{fmtBRL(totalPending)}</div>
+        </div>
+        <div>
+          <div className="weekly-stat-label">Pendentes</div>
+          <div className="weekly-stat-value">{pending.length}</div>
+        </div>
+        <div>
+          <div className="weekly-stat-label">Recebido (histórico)</div>
+          <div className="weekly-stat-value pos">{fmtBRL(totalReceived)}</div>
+        </div>
+      </div>
+
+      {/* Pending */}
+      <div style={{ marginBottom: 8, fontWeight: 700, fontFamily: 'var(--font-display)', fontSize: 15 }}>Pendentes</div>
+      <div className="table-wrap" style={{ marginBottom: 20 }}>
+        <table>
+          <thead>
+            <tr><th>App / Origem</th><th>Valor</th><th>Data Prevista</th><th>Situação</th><th>Observações</th><th>Ações</th></tr>
+          </thead>
+          <tbody>
+            {pending.length === 0 ? (
+              <tr><td colSpan={6} style={{ textAlign: 'center', padding: 32, color: 'var(--muted)' }}>Nenhum recebimento pendente.</td></tr>
+            ) : pending.map(r => {
+              const overdue = r.expected_date < today;
+              const daysLeft = Math.round((new Date(r.expected_date) - new Date(today)) / 86400000);
+              return (
+                <tr key={r.id} className={overdue ? 'overdue' : ''}>
+                  <td style={{ fontWeight: 600 }}>{r.app}</td>
+                  <td className="mono" style={{ fontWeight: 700, color: 'var(--success)' }}>{fmtBRL(r.amount)}</td>
+                  <td style={{ fontSize: 12, color: overdue ? 'var(--danger)' : 'inherit' }}>
+                    {fmtDate(r.expected_date)}
+                    {!overdue && daysLeft <= 7 && <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--warning)' }}>em {daysLeft}d</span>}
+                    {overdue && <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--danger)' }}>atrasado</span>}
+                  </td>
+                  <td><span className="badge badge-pending">Pendente</span></td>
+                  <td style={{ fontSize: 12, color: 'var(--muted)' }}>{r.notes || '—'}</td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button className="btn btn-primary btn-sm" onClick={() => setReceberModal(r)}>✓ Recebido</button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => setModal({ mode: 'edit', rec: r })}>✎</button>
+                      <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => setConfirm(r)}>✕</button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Received history */}
+      {received.length > 0 && (
+        <>
+          <div style={{ marginBottom: 8, fontWeight: 700, fontFamily: 'var(--font-display)', fontSize: 15 }}>Histórico Recebido</div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr><th>App</th><th>Valor</th><th>Previsto</th><th>Recebido em</th><th>Ações</th></tr>
+              </thead>
+              <tbody>
+                {received.slice(0,20).map(r => (
+                  <tr key={r.id} className="paid">
+                    <td style={{ fontWeight: 600 }}>{r.app}</td>
+                    <td className="mono amount-cell">{fmtBRL(r.amount)}</td>
+                    <td style={{ fontSize: 12, color: 'var(--muted)' }}>{fmtDate(r.expected_date)}</td>
+                    <td style={{ fontSize: 12 }}>{fmtDate(r.received_date)}</td>
+                    <td>
+                      <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => setConfirm(r)}>✕</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {modal && <RecebimentoModal rec={modal.rec} onSave={handleSave} onClose={() => setModal(null)} />}
+
+      {receberModal && (
+        <ReceberConfirmModal
+          rec={receberModal}
+          onConfirm={handleReceber}
+          onClose={() => setReceberModal(null)}
+        />
+      )}
+
+      {confirm && (
+        <ConfirmDialog
+          title="Excluir Recebimento"
+          msg={`Excluir recebimento de ${fmtBRL(confirm.amount)} (${confirm.app})?`}
+          onConfirm={() => handleDelete(confirm.id)}
+          onCancel={() => setConfirm(null)}
+        />
+      )}
+
+      <button className="fab" onClick={() => setModal({ mode: 'new' })}>+</button>
+    </div>
+  );
+}
+
+function RecebimentoModal({ rec, onSave, onClose }) {
+  const [form, setForm] = useState({
+    app: rec?.app || '',
+    amount: rec ? rec.amount.toString().replace('.',',') : '',
+    expected_date: rec?.expected_date || todayISO(),
+    notes: rec?.notes || '',
+  });
+  const [saving, setSaving] = useState(false);
+  function set(k,v) { setForm(p=>({...p,[k]:v})); }
+
+  async function handleSave() {
+    if (!form.app || !form.amount || !form.expected_date) { toast('Preencha todos os campos.','error'); return; }
+    setSaving(true);
+    await onSave({ app: form.app, amount: parseBRLInput(form.amount), expected_date: form.expected_date, notes: form.notes||null });
+    setSaving(false);
+  }
+
+  useEffect(() => {
+    function onKey(e) { if (e.key==='Escape') onClose(); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{ maxWidth: 440 }} onClick={e=>e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">{rec ? 'Editar Recebimento' : 'Novo Recebimento'}</div>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          <div className="form-grid">
+            <div className="form-group full">
+              <label className="form-label">App / Origem *</label>
+              <select className="form-control" value={form.app} onChange={e=>set('app',e.target.value)}>
+                <option value="">Selecionar...</option>
+                {['iFood','Rappi','Keeta','99Food','Delivery próprio','Outros'].map(a=><option key={a}>{a}</option>)}
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Valor (R$) *</label>
+              <input className="form-control mono" value={form.amount} onChange={e=>set('amount',e.target.value)} placeholder="0,00" autoFocus />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Data Prevista *</label>
+              <input className="form-control" type="date" value={form.expected_date} onChange={e=>set('expected_date',e.target.value)} />
+            </div>
+            <div className="form-group full">
+              <label className="form-label">Observações</label>
+              <textarea className="form-control" rows={2} value={form.notes} onChange={e=>set('notes',e.target.value)} style={{resize:'vertical'}} />
+            </div>
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving?'Salvando...':'Salvar'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReceberConfirmModal({ rec, onConfirm, onClose }) {
+  const [receivedDate, setReceivedDate] = useState(todayISO());
+  const [saving, setSaving] = useState(false);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{ maxWidth: 420 }} onClick={e=>e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">Confirmar Recebimento</div>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontWeight: 600 }}>{rec.app}</div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 24, fontWeight: 700, color: 'var(--success)', margin: '8px 0' }}>{fmtBRL(rec.amount)}</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>Previsto para {fmtDate(rec.expected_date)}</div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Data do Recebimento *</label>
+            <input className="form-control" type="date" value={receivedDate} onChange={e=>setReceivedDate(e.target.value)} autoFocus />
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Uma receita será lançada automaticamente nesta data.</div>
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+          <button className="btn btn-primary" onClick={async()=>{setSaving(true);await onConfirm(rec,receivedDate);setSaving(false);}} disabled={saving||!receivedDate}>
+            {saving?'Registrando...':'✓ Confirmar Recebimento'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   MODULE — SOLICITAÇÕES (Aprovação de Despesas)
+═══════════════════════════════════════════════════════ */
+function Solicitacoes({ requests, setRequests, expenses, setExpenses, suppliers, isOwner, session, onRefresh }) {
+  const [modal, setModal] = useState(false);
+  const [reviewModal, setReviewModal] = useState(null);
+
+  const pending = requests.filter(r => r.status === 'pendente');
+  const reviewed = requests.filter(r => r.status !== 'pendente');
+
+  async function handleSubmit(payload) {
+    const user = (await sb.auth.getUser()).data.user;
+    const { data, error } = await sb.from('expense_requests').insert({ ...payload, requested_by: user.id }).select().single();
+    if (error) { toast('Erro: ' + error.message, 'error'); return; }
+    if (data) setRequests(prev => [data, ...prev]);
+    toast('Solicitação enviada!', 'success');
+    setModal(false);
+  }
+
+  async function handleApprove(req, note) {
+    const user = (await sb.auth.getUser()).data.user;
+    // Update request status
+    const { data, error } = await sb.from('expense_requests').update({
+      status: 'aprovado', reviewed_by: user.id, reviewed_at: new Date().toISOString(), review_note: note||null
+    }).eq('id', req.id).select().single();
+    if (error) { toast('Erro: ' + error.message, 'error'); return; }
+    if (data) setRequests(prev => prev.map(r => r.id === data.id ? data : r));
+
+    // Create expense from request
+    const expPayload = {
+      supplier_name: req.supplier_name, category: req.category,
+      expense_type: req.expense_type, amount: req.amount,
+      due_date: req.due_date, payment_method: req.payment_method,
+      notes: req.notes, status: 'pendente', created_by: user.id,
+    };
+    const { data: expData } = await sb.from('expenses').insert(expPayload).select().single();
+    if (expData) setExpenses(prev => [expData, ...prev]);
+
+    toast('Aprovado e despesa criada!', 'success');
+    setReviewModal(null);
+    onRefresh();
+  }
+
+  async function handleReject(req, note) {
+    const user = (await sb.auth.getUser()).data.user;
+    const { data, error } = await sb.from('expense_requests').update({
+      status: 'rejeitado', reviewed_by: user.id, reviewed_at: new Date().toISOString(), review_note: note||null
+    }).eq('id', req.id).select().single();
+    if (error) { toast('Erro: ' + error.message, 'error'); return; }
+    if (data) setRequests(prev => prev.map(r => r.id === data.id ? data : r));
+    toast('Solicitação rejeitada.', 'info');
+    setReviewModal(null);
+  }
+
+  return (
+    <div className="page">
+      <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div className="page-title">Solicitações</div>
+          <div className="page-subtitle">{isOwner ? 'Aprovação de despesas solicitadas pela equipe' : 'Solicite aprovação para despesas'}</div>
+        </div>
+        <button className="btn btn-primary" onClick={() => setModal(true)}>+ Nova Solicitação</button>
+      </div>
+
+      {isOwner && pending.length > 0 && (
+        <div style={{ background: '#fff3e0', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '12px 16px', marginBottom: 16, fontSize: 13, fontWeight: 600 }}>
+          ⏳ {pending.length} solicitação{pending.length > 1 ? 'ões' : ''} aguardando sua aprovação
+        </div>
+      )}
+
+      <div style={{ marginBottom: 8, fontWeight: 700, fontFamily: 'var(--font-display)', fontSize: 15 }}>
+        {isOwner ? 'Aguardando Aprovação' : 'Minhas Solicitações'}
+      </div>
+      <div className="table-wrap" style={{ marginBottom: 20 }}>
+        <table>
+          <thead>
+            <tr><th>Fornecedor</th><th>Categoria</th><th>Valor</th><th>Vencimento</th><th>Status</th><th>Ações</th></tr>
+          </thead>
+          <tbody>
+            {pending.length === 0 ? (
+              <tr><td colSpan={6} style={{ textAlign: 'center', padding: 32, color: 'var(--muted)' }}>Nenhuma solicitação pendente.</td></tr>
+            ) : pending.map(r => (
+              <tr key={r.id}>
+                <td style={{ fontWeight: 600 }}>{r.supplier_name}</td>
+                <td style={{ fontSize: 12 }}>{r.category}</td>
+                <td className="mono" style={{ fontWeight: 600 }}>{fmtBRL(r.amount)}</td>
+                <td style={{ fontSize: 12 }}>{fmtDate(r.due_date)}</td>
+                <td><span className="badge badge-pending">Pendente</span></td>
+                <td>
+                  {isOwner ? (
+                    <button className="btn btn-primary btn-sm" onClick={() => setReviewModal(r)}>Revisar</button>
+                  ) : (
+                    <span style={{ fontSize: 11, color: 'var(--muted)' }}>Aguardando owner</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {reviewed.length > 0 && (
+        <>
+          <div style={{ marginBottom: 8, fontWeight: 700, fontFamily: 'var(--font-display)', fontSize: 15 }}>Histórico</div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Fornecedor</th><th>Valor</th><th>Status</th><th>Nota</th></tr>
+              </thead>
+              <tbody>
+                {reviewed.slice(0,20).map(r => (
+                  <tr key={r.id}>
+                    <td style={{ fontWeight: 600 }}>{r.supplier_name}</td>
+                    <td className="mono">{fmtBRL(r.amount)}</td>
+                    <td>
+                      <span className="badge" style={{
+                        background: r.status==='aprovado' ? '#e8f5e9' : '#fdecea',
+                        color: r.status==='aprovado' ? '#1b5e20' : 'var(--danger)'
+                      }}>
+                        {r.status==='aprovado' ? 'Aprovado' : 'Rejeitado'}
+                      </span>
+                    </td>
+                    <td style={{ fontSize: 11, color: 'var(--muted)' }}>{r.review_note || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {modal && <SolicitacaoModal suppliers={suppliers} onSave={handleSubmit} onClose={() => setModal(false)} />}
+      {reviewModal && (
+        <ReviewModal
+          req={reviewModal}
+          onApprove={handleApprove}
+          onReject={handleReject}
+          onClose={() => setReviewModal(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function SolicitacaoModal({ suppliers, onSave, onClose }) {
+  const [form, setForm] = useState({
+    supplier_name: '', category: '', expense_type: '',
+    amount: '', due_date: todayISO(), payment_method: '', notes: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [showSug, setShowSug] = useState(false);
+  function set(k,v) { setForm(p=>({...p,[k]:v})); }
+  const filtered = suppliers.filter(s => form.supplier_name && s.name.toLowerCase().includes(form.supplier_name.toLowerCase()));
+
+  async function handleSave() {
+    if (!form.supplier_name || !form.category || !form.amount || !form.due_date) { toast('Preencha os campos obrigatórios.','error'); return; }
+    setSaving(true);
+    await onSave({ ...form, amount: parseBRLInput(form.amount), payment_method: form.payment_method||null, expense_type: form.expense_type||null, notes: form.notes||null });
+    setSaving(false);
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" onClick={e=>e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">Nova Solicitação de Despesa</div>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          <div className="form-grid">
+            <div className="form-group full" style={{ position: 'relative' }}>
+              <label className="form-label">Fornecedor *</label>
+              <input className="form-control" value={form.supplier_name}
+                onChange={e=>{set('supplier_name',e.target.value);setShowSug(true);}}
+                onBlur={()=>setTimeout(()=>setShowSug(false),150)} />
+              {showSug && filtered.length > 0 && (
+                <div style={{ position:'absolute',top:'100%',left:0,right:0,background:'#fff',border:'1px solid var(--border)',borderTop:'none',zIndex:10,maxHeight:140,overflowY:'auto' }}>
+                  {filtered.map(s=>(
+                    <div key={s.id} style={{ padding:'9px 12px',cursor:'pointer',fontSize:13 }}
+                      onMouseDown={()=>{set('supplier_name',s.name);setShowSug(false);}}>
+                      <strong>{s.name}</strong> <span style={{color:'var(--muted)',fontSize:11}}>{s.category}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="form-group">
+              <label className="form-label">Categoria *</label>
+              <select className="form-control" value={form.category} onChange={e=>set('category',e.target.value)}>
+                <option value="">Selecionar...</option>
+                {['Compras','Gastos Fixos','Gastos Variáveis','Gastos Gerais','Impostos','Salários'].map(c=><option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Tipo de Gasto</label>
+              <input className="form-control" value={form.expense_type} onChange={e=>set('expense_type',e.target.value)} placeholder="Ex: Mussarela" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Valor (R$) *</label>
+              <input className="form-control mono" value={form.amount} onChange={e=>set('amount',e.target.value)} placeholder="0,00" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Vencimento *</label>
+              <input className="form-control" type="date" value={form.due_date} onChange={e=>set('due_date',e.target.value)} />
+            </div>
+            <div className="form-group full">
+              <label className="form-label">Observações / Justificativa</label>
+              <textarea className="form-control" rows={2} value={form.notes} onChange={e=>set('notes',e.target.value)} placeholder="Descreva o motivo da compra..." style={{resize:'vertical'}} />
+            </div>
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving?'Enviando...':'Enviar Solicitação'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReviewModal({ req, onApprove, onReject, onClose }) {
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{ maxWidth: 480 }} onClick={e=>e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">Revisar Solicitação</div>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          <div style={{ background:'#f5f2ed',borderRadius:'var(--radius)',padding:'14px 16px',marginBottom:16 }}>
+            <div style={{ fontWeight:600,fontSize:15,marginBottom:4 }}>{req.supplier_name}</div>
+            <div style={{ fontFamily:'var(--font-mono)',fontSize:20,fontWeight:700,color:'var(--black)',marginBottom:6 }}>{fmtBRL(req.amount)}</div>
+            <div style={{ fontSize:12,color:'var(--muted)' }}>{req.category}{req.expense_type?' · '+req.expense_type:''} · Vence {fmtDate(req.due_date)}</div>
+            {req.notes && <div style={{ marginTop:8,fontSize:12,fontStyle:'italic' }}>"{req.notes}"</div>}
+          </div>
+          <div className="form-group">
+            <label className="form-label">Nota (opcional)</label>
+            <textarea className="form-control" rows={2} value={note} onChange={e=>setNote(e.target.value)} placeholder="Comentário para a equipe..." style={{resize:'vertical'}} />
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-danger" onClick={async()=>{setSaving(true);await onReject(req,note);setSaving(false);}} disabled={saving}>✕ Rejeitar</button>
+          <button className="btn btn-primary" onClick={async()=>{setSaving(true);await onApprove(req,note);setSaving(false);}} disabled={saving}>✓ Aprovar e Criar Despesa</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /* ═══════════════════════════════════════════════════════
    MODULE — RECEITAS
@@ -2631,6 +3350,364 @@ function ReceitaModal({ rec, onSave, onClose }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+
+/* ═══════════════════════════════════════════════════════
+   NÍVEL 2 — DRE MENSAL
+═══════════════════════════════════════════════════════ */
+function DREMensal({ expenses, revenue, expenseItems }) {
+  const now = new Date();
+  const months12 = Array.from({length:12},(_,i) => {
+    const d = new Date(now.getFullYear(), now.getMonth()-11+i, 1);
+    return monthISO(d);
+  });
+  const [selectedMonth, setSelectedMonth] = useState(monthISO(now));
+
+  function revForMonth(ym) {
+    return revenue.filter(r => {
+      const key = r.date ? r.date : (r.month + '-01');
+      return key.startsWith(ym);
+    }).reduce((a,b) => a + (parseFloat(b.amount)||0), 0);
+  }
+
+  function expForCat(ym, cats) {
+    return expenses.filter(e => {
+      const date = e.paid_date || e.due_date;
+      return date.startsWith(ym) && cats.includes(e.category);
+    }).reduce((a,b) => a + (parseFloat(b.amount)||0), 0);
+  }
+
+  const receitaBruta = revForMonth(selectedMonth);
+  const receitaNaoOp = revenue.filter(r => {
+    const key = r.date ? r.date : (r.month + '-01');
+    return key.startsWith(selectedMonth) && r.tipo === 'nao_operacional';
+  }).reduce((a,b) => a + (parseFloat(b.amount)||0), 0);
+  const receitaOp = receitaBruta - receitaNaoOp;
+
+  const cmv = expForCat(selectedMonth, ['Compras']);
+  const lucroBruto = receitaOp - cmv;
+  const margemBruta = receitaOp > 0 ? (lucroBruto/receitaOp*100) : 0;
+
+  const salarios = expForCat(selectedMonth, ['Salários']);
+  const fixos = expForCat(selectedMonth, ['Gastos Fixos']);
+  const variaveis = expForCat(selectedMonth, ['Gastos Variáveis']);
+  const gerais = expForCat(selectedMonth, ['Gastos Gerais']);
+  const totalOpEx = salarios + fixos + variaveis + gerais;
+
+  const ebitda = lucroBruto - totalOpEx;
+  const impostos = expForCat(selectedMonth, ['Impostos']);
+  const lucroLiquido = ebitda - impostos;
+  const margemLiquida = receitaOp > 0 ? (lucroLiquido/receitaOp*100) : 0;
+
+  const rows = [
+    { label: 'Receita Operacional Bruta', value: receitaOp, bold: true, positive: true },
+    { label: 'CMV — Compras e Insumos', value: -cmv, indent: true },
+    { label: 'Lucro Bruto', value: lucroBruto, bold: true, margin: margemBruta, divider: true },
+    { label: 'Salários', value: -salarios, indent: true },
+    { label: 'Gastos Fixos', value: -fixos, indent: true },
+    { label: 'Gastos Variáveis', value: -variaveis, indent: true },
+    { label: 'Gastos Gerais', value: -gerais, indent: true },
+    { label: 'Total Despesas Operacionais', value: -totalOpEx, bold: true },
+    { label: 'EBITDA', value: ebitda, bold: true, divider: true },
+    { label: 'Impostos', value: -impostos, indent: true },
+    { label: 'Lucro Líquido', value: lucroLiquido, bold: true, margin: margemLiquida, divider: true, highlight: true },
+    ...(receitaNaoOp > 0 ? [{ label: 'Receitas Não Operacionais', value: receitaNaoOp, indent: true, muted: true }] : []),
+  ];
+
+  return (
+    <div className="chart-card">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+        <div>
+          <div className="chart-title">DRE — Demonstrativo de Resultado</div>
+          <div className="chart-sub">Resultado econômico do período</div>
+        </div>
+        <select className="form-control" style={{ width: 180 }} value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}>
+          {months12.map(m => <option key={m} value={m}>{getFullMonthLabel(m)}</option>)}
+        </select>
+      </div>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr style={{ background: 'var(--black)' }}>
+            <th style={{ padding: '10px 16px', textAlign: 'left', color: '#fff', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Item</th>
+            <th style={{ padding: '10px 16px', textAlign: 'right', color: '#fff', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Valor</th>
+            <th style={{ padding: '10px 16px', textAlign: 'right', color: '#fff', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>% Receita</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={i} style={{
+              borderBottom: row.divider ? '2px solid var(--black)' : '1px solid #f0ece6',
+              background: row.highlight ? (row.value >= 0 ? '#f0fff4' : '#fff8f8') : 'transparent',
+            }}>
+              <td style={{
+                padding: '10px 16px',
+                paddingLeft: row.indent ? 32 : 16,
+                fontWeight: row.bold ? 700 : 400,
+                fontFamily: row.bold ? 'var(--font-display)' : 'var(--font-ui)',
+                fontSize: row.bold ? 14 : 13,
+                color: row.muted ? 'var(--muted)' : 'var(--black)',
+              }}>{row.label}</td>
+              <td style={{
+                padding: '10px 16px',
+                textAlign: 'right',
+                fontFamily: 'var(--font-mono)',
+                fontWeight: row.bold ? 700 : 500,
+                fontSize: row.bold ? 14 : 13,
+                color: row.value >= 0 ? (row.bold ? 'var(--success)' : 'var(--black)') : 'var(--danger)',
+              }}>
+                {row.value < 0 ? '− ' : ''}{fmtBRL(Math.abs(row.value))}
+              </td>
+              <td style={{
+                padding: '10px 16px',
+                textAlign: 'right',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 12,
+                color: row.margin !== undefined
+                  ? (row.margin >= 0 ? 'var(--success)' : 'var(--danger)')
+                  : 'var(--muted)',
+              }}>
+                {row.margin !== undefined
+                  ? (row.margin >= 0 ? '+' : '') + row.margin.toFixed(1) + '%'
+                  : receitaOp > 0
+                    ? (row.value/receitaOp*100).toFixed(1) + '%'
+                    : '—'}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   NÍVEL 2 — CMV
+═══════════════════════════════════════════════════════ */
+function CMVChart({ expenses, revenue, expenseItems }) {
+  const now = new Date();
+  const months6 = Array.from({length:6},(_,i) => {
+    const d = new Date(now.getFullYear(), now.getMonth()-5+i, 1);
+    return monthISO(d);
+  });
+
+  const chartRef = useRef(null);
+  const chartInst = useRef(null);
+
+  function revForMonth(ym) {
+    return revenue.filter(r => {
+      const key = r.date ? r.date : (r.month + '-01');
+      return key.startsWith(ym) && (!r.tipo || r.tipo === 'operacional');
+    }).reduce((a,b) => a + (parseFloat(b.amount)||0), 0);
+  }
+
+  function cmvForMonth(ym) {
+    return expenses.filter(e => {
+      const date = e.paid_date || e.due_date;
+      return date.startsWith(ym) && e.category === 'Compras';
+    }).reduce((a,b) => a + (parseFloat(b.amount)||0), 0);
+  }
+
+  const data = months6.map(ym => {
+    const rev = revForMonth(ym);
+    const cmv = cmvForMonth(ym);
+    const pct = rev > 0 ? (cmv/rev*100) : 0;
+    return { ym, rev, cmv, pct };
+  });
+
+  useEffect(() => {
+    if (!chartRef.current) return;
+    if (chartInst.current) chartInst.current.destroy();
+    chartInst.current = new Chart(chartRef.current, {
+      type: 'bar',
+      data: {
+        labels: months6.map(getMonthLabel),
+        datasets: [
+          { label: 'Receita Op.', data: data.map(d => d.rev), backgroundColor: '#19903a', borderRadius: 2 },
+          { label: 'CMV', data: data.map(d => d.cmv), backgroundColor: '#000', borderRadius: 2 },
+        ]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { labels: { font: { family: 'DM Sans', size: 12 } } } },
+        scales: {
+          y: { ticks: { callback: v => 'R$'+Math.round(v/1000)+'k', font: { family: 'JetBrains Mono', size: 10 } }, grid: { color: '#f0ece6' } },
+          x: { ticks: { font: { family: 'DM Sans', size: 11 } }, grid: { display: false } }
+        }
+      }
+    });
+    return () => { if(chartInst.current) chartInst.current.destroy(); };
+  }, [expenses, revenue]);
+
+  const avgCMV = data.filter(d => d.pct > 0).reduce((a,b) => a+b.pct, 0) / (data.filter(d => d.pct > 0).length || 1);
+
+  return (
+    <div className="chart-card">
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
+        <div>
+          <div className="chart-title">CMV — Custo de Mercadoria Vendida</div>
+          <div className="chart-sub">Percentual do faturamento consumido em compras · 6 meses</div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: 10, color: 'var(--muted)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Média CMV%</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 22, fontWeight: 700, color: avgCMV > 35 ? 'var(--danger)' : 'var(--success)' }}>
+            {avgCMV.toFixed(1)}%
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--muted)' }}>Referência ideal: &lt; 35%</div>
+        </div>
+      </div>
+      <canvas ref={chartRef} height={80} />
+      <table style={{ width: '100%', marginTop: 12, borderCollapse: 'collapse', fontSize: 12 }}>
+        <thead>
+          <tr style={{ background: '#f5f2ed' }}>
+            <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: 10, fontWeight: 600, color: 'var(--muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Mês</th>
+            <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: 10, fontWeight: 600, color: 'var(--muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Receita Op.</th>
+            <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: 10, fontWeight: 600, color: 'var(--muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>CMV</th>
+            <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: 10, fontWeight: 600, color: 'var(--muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>CMV%</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.map(d => (
+            <tr key={d.ym} style={{ borderBottom: '1px solid #f0ece6' }}>
+              <td style={{ padding: '7px 10px', fontWeight: 500 }}>{getFullMonthLabel(d.ym)}</td>
+              <td style={{ padding: '7px 10px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{fmtBRL(d.rev)}</td>
+              <td style={{ padding: '7px 10px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{fmtBRL(d.cmv)}</td>
+              <td style={{ padding: '7px 10px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: d.pct > 35 ? 'var(--danger)' : d.pct > 0 ? 'var(--success)' : 'var(--muted)' }}>
+                {d.pct > 0 ? d.pct.toFixed(1) + '%' : '—'}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   NÍVEL 2 — COMPARATIVO MÊS A MÊS
+═══════════════════════════════════════════════════════ */
+function ComparativoMensal({ expenses, revenue }) {
+  const now = new Date();
+
+  function getMonthData(ym) {
+    const rev = revenue.filter(r => {
+      const key = r.date ? r.date : (r.month + '-01');
+      return key.startsWith(ym);
+    }).reduce((a,b) => a + (parseFloat(b.amount)||0), 0);
+
+    const exp = expenses.filter(e => {
+      const date = e.paid_date || e.due_date;
+      return date.startsWith(ym);
+    }).reduce((a,b) => a + (parseFloat(b.amount)||0), 0);
+
+    const catBreakdown = {};
+    expenses.filter(e => {
+      const date = e.paid_date || e.due_date;
+      return date.startsWith(ym);
+    }).forEach(e => {
+      catBreakdown[e.category] = (catBreakdown[e.category]||0) + (parseFloat(e.amount)||0);
+    });
+
+    return { rev, exp, result: rev-exp, catBreakdown };
+  }
+
+  const currentM = monthISO(now);
+  const prevDate = new Date(now.getFullYear(), now.getMonth()-1, 1);
+  const prevM = monthISO(prevDate);
+  const prev2Date = new Date(now.getFullYear(), now.getMonth()-2, 1);
+  const prev2M = monthISO(prev2Date);
+
+  const curr = getMonthData(currentM);
+  const prev = getMonthData(prevM);
+  const prev2 = getMonthData(prev2M);
+
+  function delta(curr, prev) {
+    if (prev === 0) return null;
+    return ((curr - prev) / prev * 100);
+  }
+
+  function DeltaBadge({ curr, prev }) {
+    const d = delta(curr, prev);
+    if (d === null) return <span style={{ color: 'var(--muted)', fontSize: 11 }}>—</span>;
+    const positive = d >= 0;
+    return (
+      <span style={{
+        fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600,
+        color: positive ? 'var(--success)' : 'var(--danger)',
+      }}>
+        {positive ? '▲' : '▼'} {Math.abs(d).toFixed(1)}%
+      </span>
+    );
+  }
+
+  const allCats = [...new Set([...Object.keys(curr.catBreakdown), ...Object.keys(prev.catBreakdown)])].sort();
+
+  return (
+    <div className="chart-card">
+      <div className="chart-title">Comparativo Mês a Mês</div>
+      <div className="chart-sub">Variação de receita, despesas e categorias</div>
+
+      {/* Main comparison */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, margin: '16px 0' }}>
+        {[
+          { label: 'Receita', curr: curr.rev, prev: prev.rev, prev2: prev2.rev },
+          { label: 'Despesas', curr: curr.exp, prev: prev.exp, prev2: prev2.exp },
+          { label: 'Resultado', curr: curr.result, prev: prev.result, prev2: prev2.result },
+        ].map(item => (
+          <div key={item.label} className="metric-card" style={{ padding: '14px 16px' }}>
+            <div className="metric-label">{item.label}</div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 700, color: item.label === 'Resultado' ? (item.curr >= 0 ? 'var(--success)' : 'var(--danger)') : 'var(--black)', margin: '4px 0' }}>
+              {fmtBRL(Math.abs(item.curr))}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>vs {getMonthLabel(prevM)}: <DeltaBadge curr={item.curr} prev={item.prev} /></div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>vs {getMonthLabel(prev2M)}: <DeltaBadge curr={item.curr} prev={item.prev2} /></div>
+          </div>
+        ))}
+      </div>
+
+      {/* Category breakdown */}
+      {allCats.length > 0 && (
+        <>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>Despesas por Categoria</div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: '#f5f2ed' }}>
+                <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Categoria</th>
+                <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{getMonthLabel(prev2M)}</th>
+                <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{getMonthLabel(prevM)}</th>
+                <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{getMonthLabel(currentM)}</th>
+                <th style={{ padding: '6px 10px', textAlign: 'right', fontSize: 10, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Var. %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {allCats.map(cat => {
+                const c2 = prev2.catBreakdown[cat] || 0;
+                const c1 = prev.catBreakdown[cat] || 0;
+                const c0 = curr.catBreakdown[cat] || 0;
+                const d = delta(c0, c1);
+                return (
+                  <tr key={cat} style={{ borderBottom: '1px solid #f0ece6' }}>
+                    <td style={{ padding: '7px 10px', fontWeight: 500 }}>{cat}</td>
+                    <td style={{ padding: '7px 10px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--muted)' }}>{c2 > 0 ? fmtBRL(c2) : '—'}</td>
+                    <td style={{ padding: '7px 10px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--muted)' }}>{c1 > 0 ? fmtBRL(c1) : '—'}</td>
+                    <td style={{ padding: '7px 10px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{c0 > 0 ? fmtBRL(c0) : '—'}</td>
+                    <td style={{ padding: '7px 10px', textAlign: 'right' }}>
+                      {d !== null ? (
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, color: d <= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                          {d >= 0 ? '▲' : '▼'} {Math.abs(d).toFixed(1)}%
+                        </span>
+                      ) : '—'}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </>
+      )}
     </div>
   );
 }
@@ -3117,6 +4194,16 @@ function Relatorios({ expenses, revenue, expenseItems }) {
         <canvas ref={balanceChartRef} height={80} />
       </div>
 
+      {/* ── DRE ─────────────────────────────────────────── */}
+      <div style={{ marginTop: 8, marginBottom: 8 }}>
+        <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 900, marginBottom: 4 }}>Resultado Econômico</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>DRE, CMV e comparativo mensal</div>
+      </div>
+
+      <DREMensal expenses={expenses} revenue={revenue} expenseItems={expenseItems} />
+      <CMVChart expenses={expenses} revenue={revenue} expenseItems={expenseItems} />
+      <ComparativoMensal expenses={expenses} revenue={revenue} />
+
       {/* ── ANÁLISE DE INSUMOS ─────────────────────────── */}
       <div style={{ marginTop: 8, marginBottom: 8 }}>
         <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 900, marginBottom: 4 }}>Análise de Insumos</div>
@@ -3143,6 +4230,443 @@ function Relatorios({ expenses, revenue, expenseItems }) {
         </>
       )}
 
+    </div>
+  );
+}
+
+
+
+
+/* ═══════════════════════════════════════════════════════
+   IMPORTADOR DE PLANILHA
+═══════════════════════════════════════════════════════ */
+function ImportadorPlanilha({ onRefresh }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+  const fileRef = useRef(null);
+
+  // Convert Excel serial date to ISO string
+  function excelDateToISO(serial) {
+    if (!serial || isNaN(serial)) return null;
+    const num = parseFloat(serial);
+    if (num < 1000) return null; // not a date
+    const date = new Date((num - 25569) * 86400 * 1000);
+    return date.toISOString().split('T')[0];
+  }
+
+  // Map Grupo/Subgrupo to system category
+  function mapCategory(grupo, subgrupo) {
+    const g = (grupo || '').toLowerCase();
+    const s = (subgrupo || '').toLowerCase();
+    if (s.includes('salário') || s.includes('salario')) return 'Salários';
+    if (s.includes('imposto') || s.includes('das') || s.includes('tributo')) return 'Impostos';
+    if (g.includes('fixo') || s.includes('aluguel') || s.includes('energia') || 
+        s.includes('água') || s.includes('telefon') || s.includes('segur') ||
+        s.includes('contabilidade') || s.includes('taxa')) return 'Gastos Fixos';
+    if (g.includes('variável') || g.includes('variavel')) return 'Compras';
+    if (g.includes('não operacional') || g.includes('nao operacional')) return 'Gastos Gerais';
+    return 'Gastos Gerais';
+  }
+
+  // Map tipo receita
+  function mapTipoReceita(grupo) {
+    const g = (grupo || '').toLowerCase();
+    if (g.includes('não operacional') || g.includes('nao operacional')) return 'nao_operacional';
+    return 'operacional';
+  }
+
+  function handleFile(file) {
+    if (!file) return;
+    setLoading(true);
+    setError('');
+    setResult(null);
+    setRows([]);
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: 'binary' });
+        
+        // Find Lancamentos sheet
+        const sheetName = wb.SheetNames.find(n => n.toLowerCase().includes('lancamento')) || wb.SheetNames[0];
+        const ws = wb.Sheets[sheetName];
+        const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+        // Find header row
+        let headerIdx = -1;
+        for (let i = 0; i < Math.min(data.length, 20); i++) {
+          const row = data[i];
+          if (row.some(cell => String(cell).toLowerCase().includes('cliente') || String(cell).toLowerCase() === 'data')) {
+            headerIdx = i;
+            break;
+          }
+        }
+
+        if (headerIdx === -1) {
+          setError('Não encontrei o cabeçalho da planilha. Verifique se a aba "Lancamentos" existe.');
+          setLoading(false);
+          return;
+        }
+
+        const headers = data[headerIdx].map(h => String(h).trim().toLowerCase());
+        const dataIdx = headers.findIndex(h => h === 'data' || h.includes('data'));
+        const clienteIdx = headers.findIndex(h => h.includes('cliente') || h.includes('fornecedor'));
+        const valorIdx = headers.findIndex(h => h === 'valor');
+        const tipoIdx = headers.findIndex(h => h === 'tipo');
+        const grupoIdx = headers.findIndex(h => h === 'grupo');
+        const subgrupoIdx = headers.findIndex(h => h === 'subgrupo');
+        const statusIdx = headers.findIndex(h => h === 'status');
+
+        const parsed = [];
+        for (let i = headerIdx + 1; i < data.length; i++) {
+          const row = data[i];
+          if (!row || row.every(c => c === '' || c === null || c === undefined)) continue;
+
+          const dateRaw = row[dataIdx];
+          const date = excelDateToISO(dateRaw);
+          if (!date) continue;
+
+          const cliente = String(row[clienteIdx] || '').trim();
+          const valor = parseFloat(row[valorIdx]) || 0;
+          const tipo = String(row[tipoIdx] || '').trim();
+          const grupo = String(row[grupoIdx] || '').trim();
+          const subgrupo = String(row[subgrupoIdx] || '').trim();
+          const status = String(row[statusIdx] || '').trim();
+
+          if (!cliente || valor <= 0) continue;
+          if (status.toLowerCase() !== 'realizado' && status !== '') {
+            // skip non-realized if status column exists and is not realizado
+          }
+
+          parsed.push({ date, cliente, valor, tipo, grupo, subgrupo, isEntrada: tipo === 'Entradas' });
+        }
+
+        setRows(parsed);
+        setLoading(false);
+      } catch (err) {
+        setError('Erro ao ler o arquivo: ' + err.message);
+        setLoading(false);
+      }
+    };
+    reader.readAsBinaryString(file);
+  }
+
+  async function handleImport() {
+    if (rows.length === 0) return;
+    setImporting(true);
+    setError('');
+
+    const user = (await sb.auth.getUser()).data.user;
+    let revCount = 0, expCount = 0, errCount = 0;
+
+    const entradas = rows.filter(r => r.isEntrada);
+    const saidas = rows.filter(r => !r.isEntrada);
+
+    // Insert revenue in batches of 50
+    for (let i = 0; i < entradas.length; i += 50) {
+      const batch = entradas.slice(i, i + 50).map(r => ({
+        date: r.date,
+        month: r.date.slice(0, 7),
+        amount: r.valor,
+        tipo: mapTipoReceita(r.grupo),
+        cliente: r.cliente,
+        notes: r.subgrupo || null,
+        created_by: user.id,
+      }));
+      const { error } = await sb.from('revenue').insert(batch);
+      if (error) errCount += batch.length;
+      else revCount += batch.length;
+    }
+
+    // Insert expenses in batches of 50
+    for (let i = 0; i < saidas.length; i += 50) {
+      const batch = saidas.slice(i, i + 50).map(r => ({
+        supplier_name: r.cliente,
+        category: mapCategory(r.grupo, r.subgrupo),
+        expense_type: r.subgrupo || null,
+        amount: r.valor,
+        due_date: r.date,
+        paid_date: r.date,
+        status: 'pago',
+        created_by: user.id,
+      }));
+      const { error } = await sb.from('expenses').insert(batch);
+      if (error) errCount += batch.length;
+      else expCount += batch.length;
+    }
+
+    setResult({ revCount, expCount, errCount, total: rows.length });
+    setImporting(false);
+    setRows([]);
+    onRefresh();
+  }
+
+  const entradas = rows.filter(r => r.isEntrada);
+  const saidas = rows.filter(r => !r.isEntrada);
+  const totalEntradas = entradas.reduce((a, b) => a + b.valor, 0);
+  const totalSaidas = saidas.reduce((a, b) => a + b.valor, 0);
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-header">Importar Planilha de Lançamentos</div>
+      <div className="settings-section-body">
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
+          Importe sua planilha de fluxo de caixa. Entradas viram receitas, saídas viram despesas pagas.
+          Funciona com o formato da planilha Jaque Bennert e formatos similares com aba "Lancamentos".
+        </div>
+
+        {result && (
+          <div style={{ background: '#f0fff4', border: '1px solid var(--green)', borderRadius: 'var(--radius)', padding: '14px 16px', marginBottom: 16 }}>
+            <div style={{ fontWeight: 700, color: 'var(--success)', marginBottom: 6 }}>✓ Importação concluída!</div>
+            <div style={{ fontSize: 13 }}>
+              <div>Receitas importadas: <strong>{result.revCount}</strong></div>
+              <div>Despesas importadas: <strong>{result.expCount}</strong></div>
+              {result.errCount > 0 && <div style={{ color: 'var(--danger)' }}>Erros: {result.errCount}</div>}
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div style={{ background: '#fff0f0', border: '1px solid var(--danger)', borderRadius: 'var(--radius)', padding: '12px 16px', marginBottom: 16, fontSize: 13, color: 'var(--danger)' }}>
+            {error}
+          </div>
+        )}
+
+        {rows.length === 0 ? (
+          <div
+            className="nf-upload-zone"
+            onClick={() => fileRef.current?.click()}
+            onDragOver={e => { e.preventDefault(); e.currentTarget.classList.add('drag'); }}
+            onDragLeave={e => e.currentTarget.classList.remove('drag')}
+            onDrop={e => { e.preventDefault(); e.currentTarget.classList.remove('drag'); handleFile(e.dataTransfer.files[0]); }}
+          >
+            <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={e => handleFile(e.target.files[0])} />
+            <div style={{ fontSize: 28 }}>📊</div>
+            <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>Arraste o arquivo XLSX ou clique para selecionar</div>
+            <span className="nf-upload-label">Compatível com planilha Jaque Bennert e formatos similares</span>
+            {loading && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>Lendo arquivo...</div>}
+          </div>
+        ) : (
+          <>
+            {/* Preview */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
+              <div className="metric-card" style={{ padding: '12px 16px' }}>
+                <div className="metric-label">Total de Lançamentos</div>
+                <div className="metric-value" style={{ fontSize: 20 }}>{rows.length}</div>
+              </div>
+              <div className="metric-card" style={{ padding: '12px 16px' }}>
+                <div className="metric-label">Entradas (Receitas)</div>
+                <div className="metric-value green" style={{ fontSize: 16 }}>{fmtBRL(totalEntradas)}</div>
+                <div className="metric-sub">{entradas.length} lançamentos</div>
+              </div>
+              <div className="metric-card" style={{ padding: '12px 16px' }}>
+                <div className="metric-label">Saídas (Despesas)</div>
+                <div className="metric-value" style={{ fontSize: 16 }}>{fmtBRL(totalSaidas)}</div>
+                <div className="metric-sub">{saidas.length} lançamentos</div>
+              </div>
+              <div className="metric-card" style={{ padding: '12px 16px' }}>
+                <div className="metric-label">Resultado</div>
+                <div className={`metric-value ${totalEntradas - totalSaidas >= 0 ? 'positive' : 'negative'}`} style={{ fontSize: 16 }}>
+                  {fmtBRLSigned(totalEntradas - totalSaidas)}
+                </div>
+              </div>
+            </div>
+
+            {/* Sample preview */}
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>
+              Preview — primeiros 10 lançamentos
+            </div>
+            <div className="table-wrap" style={{ marginBottom: 16 }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th>Cliente/Fornecedor</th>
+                    <th>Tipo</th>
+                    <th>Valor</th>
+                    <th>Categoria (sistema)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.slice(0, 10).map((r, i) => (
+                    <tr key={i}>
+                      <td style={{ fontSize: 12 }}>{fmtDate(r.date)}</td>
+                      <td style={{ fontWeight: 500 }}>{r.cliente}</td>
+                      <td>
+                        <span className="badge" style={{
+                          background: r.isEntrada ? '#e8f5e9' : '#fff0f0',
+                          color: r.isEntrada ? '#1b5e20' : 'var(--danger)'
+                        }}>
+                          {r.isEntrada ? 'Receita' : 'Despesa'}
+                        </span>
+                      </td>
+                      <td className="mono" style={{ fontWeight: 600, color: r.isEntrada ? 'var(--success)' : 'inherit' }}>
+                        {fmtBRL(r.valor)}
+                      </td>
+                      <td style={{ fontSize: 11, color: 'var(--muted)' }}>
+                        {r.isEntrada ? mapTipoReceita(r.grupo) : mapCategory(r.grupo, r.subgrupo)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="btn btn-secondary" onClick={() => { setRows([]); setError(''); }}>
+                ✕ Cancelar
+              </button>
+              <button className="btn btn-primary" onClick={handleImport} disabled={importing}>
+                {importing ? `Importando... aguarde` : `✓ Importar ${rows.length} lançamentos`}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  function mapCategory(grupo, subgrupo) {
+    const g = (grupo || '').toLowerCase();
+    const s = (subgrupo || '').toLowerCase();
+    if (s.includes('salário') || s.includes('salario')) return 'Salários';
+    if (s.includes('imposto') || s.includes('das') || s.includes('tributo')) return 'Impostos';
+    if (g.includes('fixo') || s.includes('aluguel') || s.includes('energia') ||
+        s.includes('água') || s.includes('telefon') || s.includes('segur') ||
+        s.includes('contabilidade') || s.includes('taxa')) return 'Gastos Fixos';
+    if (g.includes('variável') || g.includes('variavel')) return 'Compras';
+    return 'Gastos Gerais';
+  }
+
+  function mapTipoReceita(grupo) {
+    const g = (grupo || '').toLowerCase();
+    if (g.includes('não operacional') || g.includes('nao operacional')) return 'nao_operacional';
+    return 'operacional';
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
+   NOTIFICAÇÕES — Vencimentos por e-mail
+═══════════════════════════════════════════════════════ */
+function NotificacoesConfig({ expenses }) {
+  const [email, setEmail] = useState(() => localStorage.getItem('vg_notif_email') || '');
+  const [days, setDays] = useState(() => localStorage.getItem('vg_notif_days') || '3');
+  const [saved, setSaved] = useState(false);
+  const [testing, setTesting] = useState(false);
+
+  function handleSave() {
+    localStorage.setItem('vg_notif_email', email);
+    localStorage.setItem('vg_notif_days', days);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+    toast('Configurações de notificação salvas!', 'success');
+  }
+
+  // Check upcoming due expenses and show in-app alert
+  const daysNum = parseInt(days) || 3;
+  const targetDate = new Date();
+  targetDate.setDate(targetDate.getDate() + daysNum);
+  const targetISO = targetDate.toISOString().split('T')[0];
+
+  const upcoming = expenses.filter(e =>
+    e.status === 'pendente' &&
+    e.due_date >= todayISO() &&
+    e.due_date <= targetISO
+  );
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-header">Notificações de Vencimento</div>
+      <div className="settings-section-body">
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
+          Configure alertas de vencimento. As notificações por e-mail requerem configuração de uma Edge Function no Supabase (guia disponível na documentação).
+        </div>
+
+        {upcoming.length > 0 && (
+          <div style={{ background:'#fff3e0',border:'1px solid var(--warning)',borderRadius:'var(--radius)',padding:'12px 16px',marginBottom:16 }}>
+            <div style={{ fontWeight:600,fontSize:13,marginBottom:6 }}>⚠ {upcoming.length} conta{upcoming.length>1?'s':''} vencendo nos próximos {daysNum} dias:</div>
+            {upcoming.map(e => (
+              <div key={e.id} style={{ fontSize:12,color:'var(--muted)',marginBottom:2 }}>
+                · {e.supplier_name} — {fmtBRL(e.amount)} — vence {fmtDate(e.due_date)}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="form-grid" style={{ maxWidth: 480 }}>
+          <div className="form-group full">
+            <label className="form-label">E-mail para notificações</label>
+            <input className="form-control" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="seu@email.com" />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Avisar com antecedência</label>
+            <select className="form-control" value={days} onChange={e=>setDays(e.target.value)}>
+              <option value="1">1 dia</option>
+              <option value="2">2 dias</option>
+              <option value="3">3 dias</option>
+              <option value="5">5 dias</option>
+              <option value="7">7 dias</option>
+            </select>
+          </div>
+          <div className="form-group" style={{ display:'flex',alignItems:'flex-end' }}>
+            <button className="btn btn-primary" onClick={handleSave}>{saved?'✓ Salvo':'Salvar'}</button>
+          </div>
+        </div>
+        <div style={{ marginTop:12,fontSize:11,color:'var(--muted)' }}>
+          💡 Os alertas aparecem no Dashboard automaticamente. Para envio por e-mail automático, configure a Edge Function "notify-due-expenses" no Supabase.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   SALDO INICIAL — Configurações
+═══════════════════════════════════════════════════════ */
+function SaldoInicialConfig() {
+  const [valor, setValor] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    const v = localStorage.getItem('vg_saldo_inicial');
+    if (v) setValor(parseFloat(v).toFixed(2).replace('.', ','));
+  }, []);
+
+  function handleSave() {
+    const num = parseBRLInput(valor);
+    localStorage.setItem('vg_saldo_inicial', num.toString());
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+    toast('Saldo inicial salvo!', 'success');
+  }
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-header">Saldo Inicial em Caixa</div>
+      <div className="settings-section-body">
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14 }}>
+          Defina o saldo que existia na conta antes de começar a usar o sistema.
+          Este valor será somado ao resultado acumulado para calcular o saldo real em caixa.
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">Saldo Inicial (R$)</label>
+            <input
+              className="form-control mono"
+              value={valor}
+              onChange={e => setValor(e.target.value)}
+              placeholder="0,00"
+              style={{ width: 200 }}
+            />
+          </div>
+          <button className="btn btn-primary" onClick={handleSave}>
+            {saved ? '✓ Salvo' : 'Salvar'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -3221,6 +4745,15 @@ function Configuracoes({ user, profile, expenses, suppliers, revenue, forecast, 
       <div className="page-header">
         <div className="page-title">Configurações</div>
       </div>
+
+      {/* Saldo Inicial */}
+      <SaldoInicialConfig />
+
+      {/* Notificações */}
+      <NotificacoesConfig expenses={expenses} />
+
+      {/* Importador */}
+      <ImportadorPlanilha onRefresh={onRefresh} />
 
       {/* Conta */}
       <div className="settings-section">
@@ -3318,6 +4851,8 @@ function App() {
   const [revenue, setRevenue] = useState([]);
   const [forecast, setForecast] = useState([]);
   const [expenseItems, setExpenseItems] = useState([]);
+  const [receivables, setReceivables] = useState([]);
+  const [expenseRequests, setExpenseRequests] = useState([]);
 
   // Keep session in a ref so callbacks always have the latest value
   const sessionRef = useRef(null);
@@ -3421,10 +4956,20 @@ function App() {
         console.error('Profile load error:', profErr);
       }
 
-      // expense_items — non-blocking, load after main render
+      // expense_items — non-blocking
       sb.from('expense_items').select('*')
         .then(({ data }) => { if (data) { setExpenseItems(data); idbSet('expense_items','all',data); } })
         .catch(e => console.warn('expense_items load failed:', e));
+
+      // receivables — non-blocking
+      sb.from('receivables').select('*').order('expected_date')
+        .then(({ data }) => { if (data) setReceivables(data); })
+        .catch(e => console.warn('receivables load failed:', e));
+
+      // expense_requests — non-blocking
+      sb.from('expense_requests').select('*').order('created_at', { ascending: false })
+        .then(({ data }) => { if (data) setExpenseRequests(data); })
+        .catch(e => console.warn('expense_requests load failed:', e));
 
       setLastSync(new Date());
     } catch (err) {
@@ -3456,11 +5001,12 @@ function App() {
     setSession(null); setProfile(null); setExpenses([]); setSuppliers([]); setRevenue([]);
   }
 
-  async function handleQuickPay(exp) {
-    await sb.from('expenses').update({ status: 'pago', paid_date: todayISO() }).eq('id', exp.id);
+  async function handleQuickPay(exp, paidDate) {
+    const date = paidDate || todayISO();
+    await sb.from('expenses').update({ status: 'pago', paid_date: date }).eq('id', exp.id);
     toast('Pago com sucesso!', 'success');
     setQuickModal(null);
-    loadAll(session);
+    loadAll(sessionRef.current, true);
   }
 
   function showModal(type, data) {
@@ -3479,10 +5025,15 @@ function App() {
 
   if (!session) return <AuthScreen onLogin={handleLogin} />;
 
+  const pendingRequests = expenseRequests.filter(r => r.status === 'pendente').length;
+  const pendingReceivables = receivables.filter(r => r.status === 'pendente').length;
+
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: '◈' },
     { id: 'contas', label: 'Contas a Pagar', icon: '◎', badge: overdueCount > 0 ? overdueCount : null },
+    { id: 'recebimentos', label: 'A Receber', icon: '◑', badge: pendingReceivables > 0 ? pendingReceivables : null },
     { id: 'receitas', label: 'Receitas', icon: '◐' },
+    { id: 'solicitacoes', label: 'Solicitações', icon: '◌', badge: isOwner && pendingRequests > 0 ? pendingRequests : null },
     { id: 'fornecedores', label: 'Fornecedores', icon: '◉' },
     { id: 'fluxo', label: 'Fluxo de Caixa', icon: '◆' },
     ...(isOwner ? [{ id: 'relatorios', label: 'Relatórios', icon: '◇' }] : []),
@@ -3532,6 +5083,8 @@ function App() {
             showModal={showModal}
             onRefresh={() => loadAll(sessionRef.current, true)}
             session={session}
+            pendingRequests={isOwner ? expenseRequests.filter(r=>r.status==='pendente').length : 0}
+            pendingReceivables={receivables.filter(r=>r.status==='pendente')}
           />
         )}
         {page === 'contas' && (
@@ -3542,6 +5095,27 @@ function App() {
             revenue={revenue}
             onRefresh={() => loadAll(sessionRef.current, true)}
             isOwner={isOwner}
+          />
+        )}
+        {page === 'recebimentos' && (
+          <Recebimentos
+            receivables={receivables}
+            setReceivables={setReceivables}
+            revenue={revenue}
+            setRevenue={setRevenue}
+            onRefresh={() => loadAll(sessionRef.current, true)}
+          />
+        )}
+        {page === 'solicitacoes' && (
+          <Solicitacoes
+            requests={expenseRequests}
+            setRequests={setExpenseRequests}
+            expenses={expenses}
+            setExpenses={setExpenses}
+            suppliers={suppliers}
+            isOwner={isOwner}
+            session={session}
+            onRefresh={() => loadAll(sessionRef.current, true)}
           />
         )}
         {page === 'receitas' && (
@@ -3586,19 +5160,11 @@ function App() {
 
       {/* Quick pay modal from dashboard */}
       {quickModal?.type === 'pay' && (
-        <div className="modal-overlay" onClick={() => setQuickModal(null)}>
-          <div className="confirm-dialog" onClick={e=>e.stopPropagation()}>
-            <div className="confirm-title">Confirmar Pagamento</div>
-            <div className="confirm-msg">
-              Marcar como pago: <strong>{quickModal.data.supplier_name}</strong><br/>
-              Valor: <strong className="mono">{fmtBRL(quickModal.data.amount)}</strong>
-            </div>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              <button className="btn btn-secondary" onClick={() => setQuickModal(null)}>Cancelar</button>
-              <button className="btn btn-primary" onClick={() => handleQuickPay(quickModal.data)}>✓ Confirmar Pagamento</button>
-            </div>
-          </div>
-        </div>
+        <PagarModal
+          expense={quickModal.data}
+          onConfirm={(exp, date) => handleQuickPay(exp, date)}
+          onClose={() => setQuickModal(null)}
+        />
       )}
 
       {/* Quick new expense from FAB */}
@@ -3742,5 +5308,22 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 
 ═══════════════════════════════════════════════════════════════
 -->
+
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    // Inline service worker for offline cache
+    const swContent = `
+const CACHE = 'vg-fin-v1';
+const ASSETS = ['./', './index.html'];
+self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS))));
+self.addEventListener('fetch', e => e.respondWith(caches.match(e.request).then(r => r || fetch(e.request))));
+`;
+    const blob = new Blob([swContent], { type: 'application/javascript' });
+    const url = URL.createObjectURL(blob);
+    navigator.serviceWorker.register(url).catch(() => {});
+  });
+}
+</script>
 </body>
 </html>
