@@ -18,7 +18,7 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root {
   --black: #000000;
@@ -2025,12 +2025,18 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
       const { data, error } = await sb.from('expenses').update({ ...payload, created_by: user.id }).eq('id', modal.expense.id).select().single();
       if (error) { toast('Erro ao salvar: ' + error.message, 'error'); return; }
       savedExpense = data;
-      if (data) setExpenses(prev => prev.map(e => e.id === data.id ? data : e));
+      if (data) {
+        setExpenses(prev => prev.map(e => e.id === data.id ? data : e));
+        logActivity('edit_expense', `Editou despesa: ${data.supplier_name} — ${fmtBRL(data.amount)}`, user.id);
+      }
     } else {
       const { data, error } = await sb.from('expenses').insert({ ...payload, created_by: user.id }).select().single();
       if (error) { toast('Erro ao salvar: ' + error.message, 'error'); return; }
       savedExpense = data;
-      if (data) setExpenses(prev => [data, ...prev]);
+      if (data) {
+        setExpenses(prev => [data, ...prev]);
+        logActivity('create_expense', `Criou despesa: ${data.supplier_name} — ${fmtBRL(data.amount)}`, user.id);
+      }
     }
 
     // Save NF items if present
@@ -2068,6 +2074,8 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
       return;
     }
     toast('Marcado como pago!', 'success');
+    const user2 = (await sb.auth.getUser()).data.user;
+    logActivity('pay_expense', `Pagou: ${exp.supplier_name} — ${fmtBRL(exp.amount)} em ${fmtDate(date)}`, user2.id);
     setPagarModal(null);
     onRefresh();
   }
@@ -4699,6 +4707,204 @@ function ImportadorPlanilha({ onRefresh }) {
   }
 }
 
+
+/* ═══════════════════════════════════════════════════════
+   USUARIOS CONFIG
+═══════════════════════════════════════════════════════ */
+function UsuariosConfig({ user }) {
+  const [users, setUsers] = useState([]);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteName, setInviteName] = useState('');
+  const [inviteRole, setInviteRole] = useState('staff');
+  const [inviting, setInviting] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    sb.from('profiles').select('*').then(({ data }) => {
+      if (data) setUsers(data);
+      setLoading(false);
+    });
+  }, []);
+
+  async function changeRole(uid, role) {
+    await sb.from('profiles').update({ role }).eq('id', uid);
+    setUsers(prev => prev.map(u => u.id === uid ? { ...u, role } : u));
+    toast('Papel atualizado!', 'success');
+  }
+
+  async function handleInvite() {
+    if (!inviteEmail || !inviteName) { toast('Preencha e-mail e nome.', 'error'); return; }
+    setInviting(true);
+
+    // Create user via Supabase Admin — requires service role
+    // Instead, create a pending invite in the DB and instruct user
+    const tempPassword = Math.random().toString(36).slice(-8) + 'A1!';
+    
+    // Try to sign up the user (works if email confirmation is disabled)
+    const { data, error } = await sb.auth.signUp({
+      email: inviteEmail,
+      password: tempPassword,
+      options: { data: { name: inviteName } }
+    });
+
+    if (error) {
+      toast('Erro: ' + error.message, 'error');
+      setInviting(false);
+      return;
+    }
+
+    if (data.user) {
+      // Create profile
+      await sb.from('profiles').insert({
+        id: data.user.id,
+        name: inviteName,
+        role: inviteRole,
+      });
+
+      setUsers(prev => [...prev, { id: data.user.id, name: inviteName, role: inviteRole }]);
+      toast(`Usuário criado! Senha temporária: ${tempPassword} — compartilhe com ${inviteName}.`, 'success');
+      setInviteEmail('');
+      setInviteName('');
+    }
+
+    setInviting(false);
+  }
+
+  async function deactivateUser(uid) {
+    await sb.from('profiles').update({ role: 'staff' }).eq('id', uid);
+    setUsers(prev => prev.map(u => u.id === uid ? { ...u, role: 'staff' } : u));
+    toast('Usuário rebaixado para staff.', 'info');
+  }
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-header">Usuários</div>
+      <div className="settings-section-body">
+        {/* User list */}
+        <div className="table-wrap" style={{ marginBottom: 20 }}>
+          <table>
+            <thead>
+              <tr><th>Nome</th><th>E-mail ref.</th><th>Papel</th><th></th></tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={4} style={{ textAlign: 'center', padding: 20, color: 'var(--muted)' }}>Carregando...</td></tr>
+              ) : users.map(u => (
+                <tr key={u.id}>
+                  <td style={{ fontWeight: 600 }}>{u.name} {u.id === user.id ? <span style={{ fontSize: 10, color: 'var(--muted)' }}>(você)</span> : ''}</td>
+                  <td style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>{u.id.slice(0,8)}...</td>
+                  <td>
+                    <select className="form-control" style={{ width: 'auto' }} value={u.role}
+                      onChange={e => changeRole(u.id, e.target.value)}
+                      disabled={u.id === user.id}>
+                      <option value="owner">Owner</option>
+                      <option value="staff">Staff</option>
+                    </select>
+                  </td>
+                  <td>
+                    {u.id !== user.id && (
+                      <span style={{ fontSize: 11, color: 'var(--muted)', cursor: 'pointer' }}
+                        onClick={() => deactivateUser(u.id)}>rebaixar</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Invite new user */}
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16, marginTop: 4 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>Adicionar novo usuário</div>
+          <div className="form-grid" style={{ maxWidth: 560 }}>
+            <div className="form-group">
+              <label className="form-label">Nome *</label>
+              <input className="form-control" value={inviteName} onChange={e => setInviteName(e.target.value)} placeholder="Ex: João Silva" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Papel</label>
+              <select className="form-control" value={inviteRole} onChange={e => setInviteRole(e.target.value)}>
+                <option value="staff">Staff</option>
+                <option value="owner">Owner</option>
+              </select>
+            </div>
+            <div className="form-group full">
+              <label className="form-label">E-mail *</label>
+              <input className="form-control" type="email" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} placeholder="email@exemplo.com" />
+            </div>
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <button className="btn btn-primary" onClick={handleInvite} disabled={inviting}>
+              {inviting ? 'Criando...' : '+ Adicionar Usuário'}
+            </button>
+          </div>
+          <div style={{ marginTop: 10, fontSize: 11, color: 'var(--muted)' }}>
+            Uma senha temporária será gerada — compartilhe com o usuário. Ele pode alterar a senha em Configurações após o primeiro acesso.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   ATIVIDADE LOG
+═══════════════════════════════════════════════════════ */
+function AtividadeLog({ activityLog }) {
+  const actionLabels = {
+    'create_expense': { label: 'Nova despesa', icon: '➕', color: 'var(--black)' },
+    'edit_expense': { label: 'Editou despesa', icon: '✎', color: 'var(--muted)' },
+    'pay_expense': { label: 'Pagou despesa', icon: '✓', color: 'var(--success)' },
+    'create_revenue': { label: 'Nova receita', icon: '💰', color: 'var(--success)' },
+    'approve_request': { label: 'Aprovou solicitação', icon: '✓', color: 'var(--success)' },
+    'reject_request': { label: 'Rejeitou solicitação', icon: '✕', color: 'var(--danger)' },
+    'import_spreadsheet': { label: 'Importou planilha', icon: '📊', color: 'var(--black)' },
+  };
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-header">
+        Log de Atividades
+        <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 400 }}>{activityLog.length} registros</span>
+      </div>
+      <div className="settings-section-body" style={{ padding: 0 }}>
+        {activityLog.length === 0 ? (
+          <div style={{ padding: '24px', textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
+            Nenhuma atividade registrada ainda.
+          </div>
+        ) : (
+          <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+            {activityLog.map((log, i) => {
+              const meta = actionLabels[log.action] || { label: log.action, icon: '●', color: 'var(--muted)' };
+              return (
+                <div key={log.id || i} style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 12,
+                  padding: '10px 20px',
+                  borderBottom: '1px solid #f0ece6',
+                }}>
+                  <div style={{ fontSize: 16, flexShrink: 0, width: 24, textAlign: 'center' }}>{meta.icon}</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: meta.color }}>{meta.label}</div>
+                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{log.details}</div>
+                  </div>
+                  <div style={{ flexShrink: 0, textAlign: 'right' }}>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>
+                      {log.profiles?.name || 'Sistema'}
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--muted)' }}>
+                      {log.created_at ? new Date(log.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════
    NOTIFICAÇÕES — Vencimentos por e-mail
 ═══════════════════════════════════════════════════════ */
@@ -4825,7 +5031,7 @@ function SaldoInicialConfig() {
 /* ═══════════════════════════════════════════════════════
    MODULE 6 — CONFIGURAÇÕES
 ═══════════════════════════════════════════════════════ */
-function Configuracoes({ user, profile, expenses, suppliers, revenue, forecast, onRefresh, onLogout }) {
+function Configuracoes({ user, profile, expenses, suppliers, revenue, forecast, activityLog, onRefresh, onLogout }) {
   const [name, setName] = useState(profile?.name || '');
   const [password, setPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -4906,6 +5112,9 @@ function Configuracoes({ user, profile, expenses, suppliers, revenue, forecast, 
       {/* Importador */}
       <ImportadorPlanilha onRefresh={onRefresh} />
 
+      {/* Log de Atividades */}
+      <AtividadeLog activityLog={activityLog} />
+
       {/* Conta */}
       <div className="settings-section">
         <div className="settings-section-header">Minha Conta</div>
@@ -4933,34 +5142,7 @@ function Configuracoes({ user, profile, expenses, suppliers, revenue, forecast, 
       </div>
 
       {/* Usuários */}
-      <div className="settings-section">
-        <div className="settings-section-header">Usuários</div>
-        <div className="settings-section-body">
-          <div className="table-wrap" style={{ marginBottom: 20 }}>
-            <table>
-              <thead>
-                <tr><th>Nome</th><th>ID</th><th>Papel</th><th>Ações</th></tr>
-              </thead>
-              <tbody>
-                {users.map(u => (
-                  <tr key={u.id}>
-                    <td style={{ fontWeight: 600 }}>{u.name}</td>
-                    <td style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>{u.id.slice(0,8)}...</td>
-                    <td>
-                      <select className="form-control" style={{ width: 'auto' }} value={u.role} onChange={e=>changeRole(u.id, e.target.value)}>
-                        <option value="owner">Owner</option>
-                        <option value="staff">Staff</option>
-                      </select>
-                    </td>
-                    <td style={{ fontSize: 12, color: 'var(--muted)' }}>{u.id === user.id ? '(você)' : ''}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 12 }}>Para convidar usuários, use o Supabase Dashboard → Authentication → Users → Add User, depois insira o perfil no SQL Editor.</div>
-        </div>
-      </div>
+      <UsuariosConfig user={user} />
 
       {/* Backup */}
       <div className="settings-section">
@@ -4985,6 +5167,22 @@ function Configuracoes({ user, profile, expenses, suppliers, revenue, forecast, 
   );
 }
 
+
+/* ═══════════════════════════════════════════════════════
+   ACTIVITY LOG HELPER
+═══════════════════════════════════════════════════════ */
+async function logActivity(action, details, userId) {
+  try {
+    await sb.from('activity_log').insert({
+      action,
+      details,
+      created_by: userId,
+    });
+  } catch (e) {
+    console.warn('Log failed:', e);
+  }
+}
+
 /* ═══════════════════════════════════════════════════════
    MAIN APP
 ═══════════════════════════════════════════════════════ */
@@ -5004,6 +5202,7 @@ function App() {
   const [expenseItems, setExpenseItems] = useState([]);
   const [receivables, setReceivables] = useState([]);
   const [expenseRequests, setExpenseRequests] = useState([]);
+  const [activityLog, setActivityLog] = useState([]);
 
   // Keep session in a ref so callbacks always have the latest value
   const sessionRef = useRef(null);
@@ -5122,6 +5321,11 @@ function App() {
         .then(({ data }) => { if (data) setExpenseRequests(data); })
         .catch(e => console.warn('expense_requests load failed:', e));
 
+      // activity_log — non-blocking
+      sb.from('activity_log').select('*, profiles(name)').order('created_at', { ascending: false }).limit(100)
+        .then(({ data }) => { if (data) setActivityLog(data); })
+        .catch(e => console.warn('activity_log load failed:', e));
+
       setLastSync(new Date());
     } catch (err) {
       console.error('loadAll error:', err);
@@ -5140,6 +5344,96 @@ function App() {
       if (!silent) setLoading(false);
     }
   }
+
+
+  // ── REALTIME SUBSCRIPTIONS ─────────────────────────────
+  const realtimeChannels = useRef([]);
+
+  function setupRealtime() {
+    // Cleanup existing subscriptions
+    realtimeChannels.current.forEach(ch => sb.removeChannel(ch));
+    realtimeChannels.current = [];
+
+    // Expenses
+    const expCh = sb.channel('expenses-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' },
+        payload => {
+          if (payload.eventType === 'INSERT') {
+            setExpenses(prev => {
+              if (prev.find(e => e.id === payload.new.id)) return prev;
+              return [payload.new, ...prev];
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            setExpenses(prev => prev.map(e => e.id === payload.new.id ? payload.new : e));
+          } else if (payload.eventType === 'DELETE') {
+            setExpenses(prev => prev.filter(e => e.id !== payload.old.id));
+          }
+        }
+      ).subscribe();
+
+    // Revenue
+    const revCh = sb.channel('revenue-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'revenue' },
+        payload => {
+          if (payload.eventType === 'INSERT') {
+            setRevenue(prev => {
+              if (prev.find(r => r.id === payload.new.id)) return prev;
+              return [...prev, payload.new];
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            setRevenue(prev => prev.map(r => r.id === payload.new.id ? payload.new : r));
+          } else if (payload.eventType === 'DELETE') {
+            setRevenue(prev => prev.filter(r => r.id !== payload.old.id));
+          }
+        }
+      ).subscribe();
+
+    // Receivables
+    const recCh = sb.channel('receivables-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'receivables' },
+        payload => {
+          if (payload.eventType === 'INSERT') {
+            setReceivables(prev => {
+              if (prev.find(r => r.id === payload.new.id)) return prev;
+              return [...prev, payload.new];
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            setReceivables(prev => prev.map(r => r.id === payload.new.id ? payload.new : r));
+          } else if (payload.eventType === 'DELETE') {
+            setReceivables(prev => prev.filter(r => r.id !== payload.old.id));
+          }
+        }
+      ).subscribe();
+
+    // Expense requests
+    const reqCh = sb.channel('requests-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'expense_requests' },
+        payload => {
+          if (payload.eventType === 'INSERT') {
+            setExpenseRequests(prev => {
+              if (prev.find(r => r.id === payload.new.id)) return prev;
+              return [payload.new, ...prev];
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            setExpenseRequests(prev => prev.map(r => r.id === payload.new.id ? payload.new : r));
+          } else if (payload.eventType === 'DELETE') {
+            setExpenseRequests(prev => prev.filter(r => r.id !== payload.old.id));
+          }
+        }
+      ).subscribe();
+
+    realtimeChannels.current = [expCh, revCh, recCh, reqCh];
+  }
+
+  // Start realtime when session is active
+  useEffect(() => {
+    if (session) {
+      setupRealtime();
+    }
+    return () => {
+      realtimeChannels.current.forEach(ch => sb.removeChannel(ch));
+    };
+  }, [session]);
 
   async function handleLogin(s) {
     setSession(s);
@@ -5303,6 +5597,7 @@ function App() {
             suppliers={suppliers}
             revenue={revenue}
             forecast={forecast}
+            activityLog={activityLog}
             onRefresh={() => loadAll(sessionRef.current, true)}
             onLogout={handleLogout}
           />
