@@ -4736,35 +4736,40 @@ function UsuariosConfig({ user }) {
     if (!inviteEmail || !inviteName) { toast('Preencha e-mail e nome.', 'error'); return; }
     setInviting(true);
 
-    // Create user via Supabase Admin — requires service role
-    // Instead, create a pending invite in the DB and instruct user
     const tempPassword = Math.random().toString(36).slice(-8) + 'A1!';
-    
-    // Try to sign up the user (works if email confirmation is disabled)
-    const { data, error } = await sb.auth.signUp({
-      email: inviteEmail,
-      password: tempPassword,
-      options: { data: { name: inviteName } }
-    });
 
-    if (error) {
-      toast('Erro: ' + error.message, 'error');
-      setInviting(false);
-      return;
-    }
+    try {
+      // Cria usuário via Worker (Admin API) — sem afetar sessão atual
+      const res = await fetch('https://dawn-cell-9729.vittoegiulio.workers.dev', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Action': 'create-user',
+        },
+        body: JSON.stringify({ email: inviteEmail, password: tempPassword, name: inviteName }),
+      });
 
-    if (data.user) {
-      // Create profile
+      const result = await res.json();
+
+      if (!res.ok || result.error) {
+        toast('Erro: ' + (result.message || result.error || 'Falha ao criar usuário'), 'error');
+        setInviting(false);
+        return;
+      }
+
+      // Cria perfil na tabela profiles
       await sb.from('profiles').insert({
-        id: data.user.id,
+        id: result.id,
         name: inviteName,
         role: inviteRole,
       });
 
-      setUsers(prev => [...prev, { id: data.user.id, name: inviteName, role: inviteRole }]);
+      setUsers(prev => [...prev, { id: result.id, name: inviteName, role: inviteRole }]);
       toast(`Usuário criado! Senha temporária: ${tempPassword} — compartilhe com ${inviteName}.`, 'success');
       setInviteEmail('');
       setInviteName('');
+    } catch (err) {
+      toast('Erro: ' + err.message, 'error');
     }
 
     setInviting(false);
