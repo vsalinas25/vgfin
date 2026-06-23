@@ -4802,17 +4802,23 @@ function UsuariosConfig({ user }) {
 
       const result = await res.json();
 
-      if (!res.ok || result.error) {
-        toast('Erro: ' + (result.message || result.error || 'Falha ao criar usuário'), 'error');
+      // result.id existe = usuário criado (mesmo que status seja 4xx em alguns casos)
+      const userId = result?.id || result?.user?.id;
+
+      if (!userId) {
+        toast('Erro: ' + (result?.message || result?.msg || 'Falha ao criar usuário'), 'error');
         setInviting(false);
         return;
       }
 
-      await sb.from('profiles').insert({ id: result.id, name: inviteName, role: inviteRole });
-      const newUser = { id: result.id, name: inviteName, role: inviteRole, email: inviteEmail };
-      setUsers(prev => [...prev, newUser]);
+      // upsert para não falhar se perfil já existir
+      await sb.from('profiles').upsert({ id: userId, name: inviteName, role: inviteRole }, { onConflict: 'id' });
 
-      // Mostra modal com senha
+      setUsers(prev => {
+        if (prev.find(u => u.id === userId)) return prev;
+        return [...prev, { id: userId, name: inviteName, role: inviteRole, email: inviteEmail }];
+      });
+
       setCreatedUser({ name: inviteName, email: inviteEmail, password: tempPassword });
       setInviteEmail('');
       setInviteName('');
