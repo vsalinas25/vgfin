@@ -3695,6 +3695,14 @@ function Receitas({ revenue, setRevenue, onRefresh, session }) {
         </table>
       </div>
 
+      {/* Extrato Importer */}
+      {extratoModal && (
+        <ExtratoImporter
+          onImport={onRefresh}
+          onClose={() => setExtratoModal(false)}
+        />
+      )}
+
       {/* Modal */}
       {modal && (
         <ReceitaModal
