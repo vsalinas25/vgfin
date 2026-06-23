@@ -948,6 +948,16 @@ const CATEGORIES = ['Compras','Gastos Fixos','Gastos Variáveis','Gastos Gerais'
 const PAYMENT_METHODS = ['PIX','Boleto','Cartão C6','Dinheiro','Débito Automático'];
 const SUPPLIER_CATEGORIES = ['Laticínios/Frios','Carnes','Embalagens','Bebidas','Distribuidora','Insumos','Segurança','Energia','Água','Gás','Telefonia','Associação','Motoboys','Contabilidade','Outros'];
 
+
+/* ═══════════════════════════════════════════════════════
+   CATEGORIES CONTEXT
+═══════════════════════════════════════════════════════ */
+const CategoriesContext = React.createContext({
+  expenseCategories: ['Compras','Gastos Fixos','Gastos Variáveis','Gastos Gerais','Impostos','Salários'],
+  supplierCategories: ['Laticínios/Frios','Carnes','Embalagens','Bebidas','Distribuidora','Insumos','Segurança','Energia','Água','Gás','Telefonia','Associação','Motoboys','Contabilidade','Outros'],
+});
+function useCategories() { return React.useContext(CategoriesContext); }
+
 /* ═══════════════════════════════════════════════════════
    TOAST MANAGER
 ═══════════════════════════════════════════════════════ */
@@ -1232,6 +1242,7 @@ function ExpenseItemsModal({ expense, onClose }) {
    EXPENSE MODAL
 ═══════════════════════════════════════════════════════ */
 function ExpenseModal({ expense, suppliers, onSave, onClose }) {
+  const { expenseCategories, supplierCategories } = useCategories();
   const DRAFT_KEY = 'vg_expense_draft';
 
   const emptyForm = {
@@ -1501,7 +1512,7 @@ function ExpenseModal({ expense, suppliers, onSave, onClose }) {
                 onChange={e => set('category', e.target.value)}
               >
                 <option value="">Selecionar...</option>
-                {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+                {expenseCategories.map(c => <option key={c}>{c}</option>)}
               </select>
               {errors.category && <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 3 }}>Campo obrigatório</div>}
             </div>
@@ -1965,6 +1976,7 @@ function PagarModal({ expense, onConfirm, onClose }) {
    MODULE 2 — CONTAS A PAGAR
 ═══════════════════════════════════════════════════════ */
 function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isOwner }) {
+  const { expenseCategories } = useCategories();
   const [filter, setFilter] = useState({ status: 'todos', category: '', search: '', from: '', to: '', week: '' });
   const [itemsModal, setItemsModal] = useState(null);
   const [codigoModal, setCodigoModal] = useState(null);
@@ -2139,7 +2151,7 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
         </select>
         <select className="form-control" value={filter.category} onChange={e => setFilter(p=>({...p,category:e.target.value}))}>
           <option value="">Todas categorias</option>
-          {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+          {expenseCategories.map(c => <option key={c}>{c}</option>)}
         </select>
         <input className="form-control" type="date" value={filter.from} onChange={e => setFilter(p=>({...p,from:e.target.value}))} placeholder="De" />
         <input className="form-control" type="date" value={filter.to} onChange={e => setFilter(p=>({...p,to:e.target.value}))} placeholder="Até" />
@@ -2288,6 +2300,7 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
    MODULE 3 — FORNECEDORES
 ═══════════════════════════════════════════════════════ */
 function Fornecedores({ suppliers, expenses, onRefresh, isOwner }) {
+  const { supplierCategories } = useCategories();
   const [view, setView] = useState('card'); // card | table
   const [search, setSearch] = useState('');
   const [catFilter, setCatFilter] = useState('');
@@ -2349,7 +2362,7 @@ function Fornecedores({ suppliers, expenses, onRefresh, isOwner }) {
         <input className="form-control" placeholder="Buscar..." value={search} onChange={e => setSearch(e.target.value)} style={{ minWidth: 200 }} />
         <select className="form-control" value={catFilter} onChange={e => setCatFilter(e.target.value)}>
           <option value="">Todas categorias</option>
-          {SUPPLIER_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+          {supplierCategories.map(c => <option key={c}>{c}</option>)}
         </select>
         <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setCatFilter(''); }}>Limpar</button>
       </div>
@@ -2500,6 +2513,7 @@ function SupplierDetail({ supplier, expenses, isOwner, onEdit, onDelete }) {
 }
 
 function SupplierModal({ supplier, onSave, onClose }) {
+  const { supplierCategories } = useCategories();
   const [form, setForm] = useState({
     name: supplier?.name || '',
     category: supplier?.category || '',
@@ -2525,7 +2539,7 @@ function SupplierModal({ supplier, onSave, onClose }) {
               <label className="form-label">Categoria *</label>
               <select className="form-control" value={form.category} onChange={e=>set('category',e.target.value)}>
                 <option value="">Selecionar...</option>
-                {SUPPLIER_CATEGORIES.map(c=><option key={c}>{c}</option>)}
+                {supplierCategories.map(c=><option key={c}>{c}</option>)}
               </select>
             </div>
             <div className="form-group">
@@ -3181,6 +3195,7 @@ function Solicitacoes({ requests, setRequests, expenses, setExpenses, suppliers,
 }
 
 function SolicitacaoModal({ suppliers, onSave, onClose }) {
+  const { expenseCategories } = useCategories();
   const [form, setForm] = useState({
     supplier_name: '', category: '', expense_type: '',
     amount: '', due_date: todayISO(), payment_method: '', notes: '',
@@ -3226,7 +3241,7 @@ function SolicitacaoModal({ suppliers, onSave, onClose }) {
               <label className="form-label">Categoria *</label>
               <select className="form-control" value={form.category} onChange={e=>set('category',e.target.value)}>
                 <option value="">Selecionar...</option>
-                {['Compras','Gastos Fixos','Gastos Variáveis','Gastos Gerais','Impostos','Salários'].map(c=><option key={c}>{c}</option>)}
+                {expenseCategories.map(c=><option key={c}>{c}</option>)}
               </select>
             </div>
             <div className="form-group">
@@ -5179,6 +5194,123 @@ function SaldoInicialConfig() {
 /* ═══════════════════════════════════════════════════════
    MODULE 6 — CONFIGURAÇÕES
 ═══════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════
+   CATEGORIAS CONFIG
+═══════════════════════════════════════════════════════ */
+function CategoriasConfig() {
+  const TYPES = [
+    { key: 'expense', label: 'Categorias de Despesa' },
+    { key: 'supplier', label: 'Categorias de Fornecedor' },
+  ];
+  const [categories, setCategories] = useState({ expense: [], supplier: [] });
+  const [loading, setLoading] = useState(true);
+  const [newName, setNewName] = useState({ expense: '', supplier: '' });
+  const [adding, setAdding] = useState({ expense: false, supplier: false });
+  const [confirmDelete, setConfirmDelete] = useState(null); // { id, name }
+
+  useEffect(() => {
+    sb.from('categories').select('*').order('name').then(({ data }) => {
+      if (data) {
+        const grouped = { expense: [], supplier: [] };
+        data.forEach(c => { if (grouped[c.type]) grouped[c.type].push(c); });
+        setCategories(grouped);
+      }
+      setLoading(false);
+    });
+  }, []);
+
+  async function handleAdd(type) {
+    const name = newName[type].trim();
+    if (!name) { toast('Digite o nome da categoria.', 'error'); return; }
+    setAdding(p => ({ ...p, [type]: true }));
+    const { data, error } = await sb.from('categories').insert({ type, name }).select().single();
+    if (error) { toast('Erro: ' + (error.message || 'Categoria já existe.'), 'error'); }
+    else {
+      setCategories(p => ({ ...p, [type]: [...p[type], data].sort((a,b) => a.name.localeCompare(b.name)) }));
+      setNewName(p => ({ ...p, [type]: '' }));
+      toast('Categoria adicionada!', 'success');
+    }
+    setAdding(p => ({ ...p, [type]: false }));
+  }
+
+  async function handleDelete(cat) {
+    const { error } = await sb.from('categories').delete().eq('id', cat.id);
+    if (error) { toast('Erro ao eliminar.', 'error'); return; }
+    setCategories(p => ({ ...p, [cat.type]: p[cat.type].filter(c => c.id !== cat.id) }));
+    setConfirmDelete(null);
+    toast('Categoria eliminada.', 'success');
+  }
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-header">Categorias</div>
+      <div className="settings-section-body">
+
+        {confirmDelete && (
+          <div className="modal-overlay" onClick={() => setConfirmDelete(null)}>
+            <div className="confirm-dialog" onClick={e => e.stopPropagation()}>
+              <div className="confirm-title">Eliminar categoria?</div>
+              <div className="confirm-msg">"{confirmDelete.name}" será removida. Despesas existentes com essa categoria não serão afetadas.</div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => setConfirmDelete(null)}>Cancelar</button>
+                <button className="btn" style={{ flex: 1, background: 'var(--danger)', color: '#fff' }}
+                  onClick={() => handleDelete(confirmDelete)}>Eliminar</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {loading ? (
+          <div style={{ color: 'var(--muted)', fontSize: 13 }}>Carregando...</div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+            {TYPES.map(({ key, label }) => (
+              <div key={key}>
+                <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 10 }}>{label}</div>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                  <input
+                    className="form-control"
+                    style={{ flex: 1, fontSize: 13 }}
+                    placeholder="Nova categoria..."
+                    value={newName[key]}
+                    onChange={e => setNewName(p => ({ ...p, [key]: e.target.value }))}
+                    onKeyDown={e => e.key === 'Enter' && handleAdd(key)}
+                  />
+                  <button className="btn btn-primary" style={{ whiteSpace: 'nowrap', fontSize: 12 }}
+                    onClick={() => handleAdd(key)} disabled={adding[key]}>
+                    {adding[key] ? '...' : '+ Add'}
+                  </button>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {categories[key].length === 0 ? (
+                    <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>Nenhuma categoria.</div>
+                  ) : categories[key].map(cat => (
+                    <div key={cat.id} style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: '7px 10px', background: '#f5f2ed', borderRadius: 4,
+                      fontSize: 13
+                    }}>
+                      <span>{cat.name}</span>
+                      <button
+                        onClick={() => setConfirmDelete(cat)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 14, padding: '0 2px', lineHeight: 1 }}
+                        title="Eliminar">✕</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ marginTop: 14, fontSize: 11, color: 'var(--muted)' }}>
+          Categorias de despesa aparecem em Contas a Pagar e Solicitações. Categorias de fornecedor aparecem no cadastro de fornecedores.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Configuracoes({ user, profile, expenses, suppliers, revenue, forecast, activityLog, onRefresh, onLogout }) {
   const [name, setName] = useState(profile?.name || '');
   const [password, setPassword] = useState('');
@@ -5292,6 +5424,9 @@ function Configuracoes({ user, profile, expenses, suppliers, revenue, forecast, 
       {/* Usuários */}
       <UsuariosConfig user={user} />
 
+      {/* Categorias */}
+      <CategoriasConfig />
+
       {/* Backup */}
       <div className="settings-section">
         <div className="settings-section-header">Backup & Dados</div>
@@ -5351,6 +5486,7 @@ function App() {
   const [receivables, setReceivables] = useState([]);
   const [expenseRequests, setExpenseRequests] = useState([]);
   const [activityLog, setActivityLog] = useState([]);
+  const [dbCategories, setDbCategories] = useState({ expense: [], supplier: [] });
 
   // Keep session in a ref so callbacks always have the latest value
   const sessionRef = useRef(null);
@@ -5453,6 +5589,17 @@ function App() {
       } catch(profErr) {
         console.error('Profile load error:', profErr);
       }
+
+      // categories — non-blocking
+      sb.from('categories').select('*').order('name')
+        .then(({ data }) => {
+          if (data) {
+            const grouped = { expense: [], supplier: [] };
+            data.forEach(c => { if (grouped[c.type]) grouped[c.type].push(c.name); });
+            setDbCategories(grouped);
+          }
+        })
+        .catch(e => console.warn('categories load failed:', e));
 
       // expense_items — non-blocking
       sb.from('expense_items').select('*')
