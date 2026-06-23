@@ -5786,7 +5786,11 @@ function App() {
     ...(isOwner ? [{ id: 'config', label: 'Configurações', shortLabel: 'Config', icon: '⊙' }] : []),
   ];
 
+  const expenseCategories = dbCategories.expense.length > 0 ? dbCategories.expense : CATEGORIES;
+  const supplierCategories = dbCategories.supplier.length > 0 ? dbCategories.supplier : SUPPLIER_CATEGORIES;
+
   return (
+    <CategoriesContext.Provider value={{ expenseCategories, supplierCategories }}>
     <div className="app">
       {/* SIDEBAR */}
       <div className="sidebar">
@@ -5958,6 +5962,7 @@ function App() {
         </div>
       )}
     </div>
+    </CategoriesContext.Provider>
   );
 }
 
