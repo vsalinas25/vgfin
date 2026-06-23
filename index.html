@@ -3306,9 +3306,248 @@ function ReviewModal({ req, onApprove, onReject, onClose }) {
 /* ═══════════════════════════════════════════════════════
    MODULE — RECEITAS
 ═══════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════
+   EXTRATO IMPORTER
+═══════════════════════════════════════════════════════ */
+function ExtratoImporter({ onImport, onClose }) {
+  const [stage, setStage] = useState('upload'); // upload | processing | preview
+  const [dragging, setDragging] = useState(false);
+  const [rows, setRows] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const fileRef = React.useRef();
+
+  async function processFile(file) {
+    setStage('processing');
+    try {
+      const base64 = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result.split(',')[1]);
+        r.onerror = () => rej(new Error('Falha ao ler arquivo'));
+        r.readAsDataURL(file);
+      });
+
+      const isPdf = file.type === 'application/pdf';
+      const mediaType = isPdf ? 'application/pdf' : file.type;
+
+      const messages = [{
+        role: 'user',
+        content: [
+          {
+            type: isPdf ? 'document' : 'image',
+            source: { type: 'base64', media_type: mediaType, data: base64 }
+          },
+          {
+            type: 'text',
+            text: `Você está analisando um extrato bancário do Itaú. Extraia TODAS as transações de ENTRADA (créditos) visíveis.
+
+Para cada entrada, retorne um objeto JSON com:
+- date: data no formato YYYY-MM-DD
+- description: descrição da transação (exatamente como aparece)
+- amount: valor numérico positivo (sem R$, sem pontos de milhar, use ponto decimal)
+- tipo: "operacional" se parecer venda/receita do negócio, "nao_operacional" caso contrário
+
+Retorne APENAS um array JSON válido, sem texto adicional, sem markdown, sem explicações.
+Exemplo: [{"date":"2026-06-01","description":"PIX RECEBIDO FULANO","amount":1500.00,"tipo":"operacional"}]
+
+Se não encontrar entradas, retorne: []`
+          }
+        ]
+      }];
+
+      const res = await fetch('https://dawn-cell-9729.vittoegiulio.workers.dev', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2000, messages }),
+      });
+
+      const data = await res.json();
+      const text = data.content?.[0]?.text || '[]';
+      const clean = text.replace(/```json|```/g, '').trim();
+      const parsed = JSON.parse(clean);
+
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        toast('Nenhuma entrada encontrada no extrato.', 'error');
+        setStage('upload');
+        return;
+      }
+
+      setRows(parsed.map((r, i) => ({ ...r, _id: i, _selected: true })));
+      setStage('preview');
+    } catch (err) {
+      toast('Erro ao processar: ' + err.message, 'error');
+      setStage('upload');
+    }
+  }
+
+  function handleDrop(e) {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) processFile(file);
+  }
+
+  function toggleRow(id) {
+    setRows(prev => prev.map(r => r._id === id ? { ...r, _selected: !r._selected } : r));
+  }
+
+  function updateRow(id, field, value) {
+    setRows(prev => prev.map(r => r._id === id ? { ...r, [field]: value } : r));
+  }
+
+  function removeRow(id) {
+    setRows(prev => prev.filter(r => r._id !== id));
+  }
+
+  async function handleSave() {
+    const selected = rows.filter(r => r._selected);
+    if (selected.length === 0) { toast('Selecione ao menos uma entrada.', 'error'); return; }
+    setSaving(true);
+    try {
+      const user = (await sb.auth.getUser()).data.user;
+      const toInsert = selected.map(r => ({
+        date: r.date,
+        month: r.date.slice(0, 7),
+        amount: parseFloat(r.amount),
+        notes: r.description,
+        cliente: r.description,
+        tipo: r.tipo,
+        created_by: user.id,
+      }));
+      const { error } = await sb.from('revenue').insert(toInsert);
+      if (error) { toast('Erro ao salvar: ' + error.message, 'error'); setSaving(false); return; }
+      toast(selected.length + ' entrada(s) importada(s) com sucesso!', 'success');
+      onImport();
+      onClose();
+    } catch (err) {
+      toast('Erro: ' + err.message, 'error');
+    }
+    setSaving(false);
+  }
+
+  const selectedCount = rows.filter(r => r._selected).length;
+  const selectedTotal = rows.filter(r => r._selected).reduce((a, r) => a + parseFloat(r.amount || 0), 0);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{ maxWidth: stage === 'preview' ? 800 : 480, width: '95vw' }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">
+            {stage === 'upload' && 'Importar Extrato Itaú'}
+            {stage === 'processing' && 'Processando...'}
+            {stage === 'preview' && 'Pré-visualização das Entradas'}
+          </div>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+
+        <div style={{ padding: '20px 24px 24px' }}>
+          {stage === 'upload' && (
+            <>
+              <div
+                className={`nf-dropzone${dragging ? ' drag-over' : ''}`}
+                style={{ marginBottom: 16 }}
+                onDragOver={e => { e.preventDefault(); setDragging(true); }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={handleDrop}
+                onClick={() => fileRef.current.click()}
+              >
+                <div style={{ fontSize: 32, marginBottom: 8 }}>🏦</div>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>Extrato Itaú</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>PNG, JPG, WEBP ou PDF · Arraste ou clique</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>O sistema extrai as entradas automaticamente via IA</div>
+              </div>
+              <input ref={fileRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }}
+                onChange={e => e.target.files[0] && processFile(e.target.files[0])} />
+              <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center' }}>
+                Funciona com prints de tela ou PDF do app/internet banking Itaú
+              </div>
+            </>
+          )}
+
+          {stage === 'processing' && (
+            <div style={{ textAlign: 'center', padding: '40px 0' }}>
+              <div style={{ fontSize: 32, marginBottom: 16 }}>⏳</div>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Analisando extrato...</div>
+              <div style={{ fontSize: 13, color: 'var(--muted)' }}>O Claude está lendo as transações do extrato</div>
+            </div>
+          )}
+
+          {stage === 'preview' && (
+            <>
+              <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>
+                Revise as entradas extraídas. Desmarque ou edite o que não estiver correto antes de salvar.
+              </div>
+              <div style={{ overflowX: 'auto', marginBottom: 16 }}>
+                <table style={{ width: '100%', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                      <th style={{ padding: '6px 8px', textAlign: 'left', width: 32 }}></th>
+                      <th style={{ padding: '6px 8px', textAlign: 'left' }}>Data</th>
+                      <th style={{ padding: '6px 8px', textAlign: 'left' }}>Descrição</th>
+                      <th style={{ padding: '6px 8px', textAlign: 'left' }}>Tipo</th>
+                      <th style={{ padding: '6px 8px', textAlign: 'right' }}>Valor</th>
+                      <th style={{ padding: '6px 8px', width: 32 }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map(r => (
+                      <tr key={r._id} style={{ borderBottom: '1px solid var(--border)', opacity: r._selected ? 1 : 0.4 }}>
+                        <td style={{ padding: '4px 8px' }}>
+                          <input type="checkbox" checked={r._selected} onChange={() => toggleRow(r._id)} />
+                        </td>
+                        <td style={{ padding: '4px 8px' }}>
+                          <input type="date" value={r.date} onChange={e => updateRow(r._id, 'date', e.target.value)}
+                            style={{ border: 'none', background: 'transparent', fontSize: 12, width: 120 }} />
+                        </td>
+                        <td style={{ padding: '4px 8px' }}>
+                          <input type="text" value={r.description} onChange={e => updateRow(r._id, 'description', e.target.value)}
+                            style={{ border: 'none', background: 'transparent', fontSize: 12, width: '100%', minWidth: 180 }} />
+                        </td>
+                        <td style={{ padding: '4px 8px' }}>
+                          <select value={r.tipo} onChange={e => updateRow(r._id, 'tipo', e.target.value)}
+                            style={{ border: 'none', background: 'transparent', fontSize: 12 }}>
+                            <option value="operacional">Operacional</option>
+                            <option value="nao_operacional">Não Operacional</option>
+                          </select>
+                        </td>
+                        <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--green)' }}>
+                          <input type="number" value={r.amount} onChange={e => updateRow(r._id, 'amount', e.target.value)}
+                            style={{ border: 'none', background: 'transparent', fontSize: 12, textAlign: 'right', width: 90, color: 'var(--green)', fontFamily: 'var(--font-mono)' }} />
+                        </td>
+                        <td style={{ padding: '4px 8px', textAlign: 'center' }}>
+                          <button onClick={() => removeRow(r._id)}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 14 }}>✕</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16,
+                background: '#f5f2ed', borderRadius: 4, padding: '10px 14px' }}>
+                <span style={{ fontSize: 13, color: 'var(--muted)' }}>{selectedCount} entrada(s) selecionada(s)</span>
+                <span style={{ fontWeight: 700, color: 'var(--green)', fontFamily: 'var(--font-mono)' }}>
+                  {fmtBRL(selectedTotal)}
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>Cancelar</button>
+                <button className="btn btn-primary" style={{ flex: 2 }} onClick={handleSave} disabled={saving || selectedCount === 0}>
+                  {saving ? 'Salvando...' : `Importar ${selectedCount} entrada(s)`}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Receitas({ revenue, setRevenue, onRefresh, session }) {
   const [modal, setModal] = useState(null); // null | {mode:'new'} | {mode:'edit', rec}
   const [confirm, setConfirm] = useState(null);
+  const [extratoModal, setExtratoModal] = useState(false);
   const [filter, setFilter] = useState({ type: 'todos', from: '', to: '', cliente: '' });
 
   const filtered = revenue.filter(r => {
@@ -3365,7 +3604,10 @@ function Receitas({ revenue, setRevenue, onRefresh, session }) {
           <div className="page-title">Receitas</div>
           <div className="page-subtitle">Registro de receitas operacionais e não operacionais</div>
         </div>
-        <button className="btn btn-primary" onClick={() => setModal({ mode: 'new' })}>+ Nova Receita</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-outline" onClick={() => setExtratoModal(true)}>📄 Importar Extrato</button>
+          <button className="btn btn-primary" onClick={() => setModal({ mode: 'new' })}>+ Nova Receita</button>
+        </div>
       </div>
 
       {/* Summary bar */}
