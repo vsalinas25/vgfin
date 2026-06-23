@@ -3007,7 +3007,16 @@ function ReceberConfirmModal({ rec, onConfirm, onClose }) {
 ═══════════════════════════════════════════════════════ */
 function Solicitacoes({ requests, setRequests, expenses, setExpenses, suppliers, isOwner, session, onRefresh }) {
   const [modal, setModal] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null);
   const [reviewModal, setReviewModal] = useState(null);
+
+  async function handleDelete(id) {
+    const { error } = await sb.from('expense_requests').delete().eq('id', id);
+    if (error) { toast('Erro ao eliminar: ' + error.message, 'error'); return; }
+    setRequests(prev => prev.filter(r => r.id !== id));
+    setConfirmDelete(null);
+    toast('Solicitação eliminada.', 'success');
+  }
 
   const pending = requests.filter(r => r.status === 'pendente');
   const reviewed = requests.filter(r => r.status !== 'pendente');
@@ -3091,11 +3100,17 @@ function Solicitacoes({ requests, setRequests, expenses, setExpenses, suppliers,
                 <td style={{ fontSize: 12 }}>{fmtDate(r.due_date)}</td>
                 <td><span className="badge badge-pending">Pendente</span></td>
                 <td>
-                  {isOwner ? (
-                    <button className="btn btn-primary btn-sm" onClick={() => setReviewModal(r)}>Revisar</button>
-                  ) : (
-                    <span style={{ fontSize: 11, color: 'var(--muted)' }}>Aguardando owner</span>
-                  )}
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    {isOwner ? (
+                      <button className="btn btn-primary btn-sm" onClick={() => setReviewModal(r)}>Revisar</button>
+                    ) : (
+                      <span style={{ fontSize: 11, color: 'var(--muted)' }}>Aguardando owner</span>
+                    )}
+                    {isOwner && (
+                      <button className="btn btn-sm" style={{ background: 'var(--danger)', color: '#fff', padding: '3px 8px' }}
+                        onClick={() => setConfirmDelete(r.id)}>✕</button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -3109,7 +3124,7 @@ function Solicitacoes({ requests, setRequests, expenses, setExpenses, suppliers,
           <div className="table-wrap">
             <table>
               <thead>
-                <tr><th>Fornecedor</th><th>Valor</th><th>Status</th><th>Nota</th></tr>
+                <tr><th>Fornecedor</th><th>Valor</th><th>Status</th><th>Nota</th><th></th></tr>
               </thead>
               <tbody>
                 {reviewed.slice(0,20).map(r => (
@@ -3125,6 +3140,12 @@ function Solicitacoes({ requests, setRequests, expenses, setExpenses, suppliers,
                       </span>
                     </td>
                     <td style={{ fontSize: 11, color: 'var(--muted)' }}>{r.review_note || '—'}</td>
+                    <td>
+                      {isOwner && (
+                        <button className="btn btn-sm" style={{ background: 'var(--danger)', color: '#fff', padding: '3px 8px', fontSize: 11 }}
+                          onClick={() => setConfirmDelete(r.id)}>✕</button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -3133,6 +3154,19 @@ function Solicitacoes({ requests, setRequests, expenses, setExpenses, suppliers,
         </>
       )}
 
+      {confirmDelete && (
+        <div className="modal-overlay" onClick={() => setConfirmDelete(null)}>
+          <div className="confirm-dialog" onClick={e => e.stopPropagation()}>
+            <div className="confirm-title">Eliminar solicitação?</div>
+            <div className="confirm-msg">Esta ação é irreversível.</div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => setConfirmDelete(null)}>Cancelar</button>
+              <button className="btn" style={{ flex: 1, background: 'var(--danger)', color: '#fff' }}
+                onClick={() => handleDelete(confirmDelete)}>Eliminar</button>
+            </div>
+          </div>
+        </div>
+      )}
       {modal && <SolicitacaoModal suppliers={suppliers} onSave={handleSubmit} onClose={() => setModal(false)} />}
       {reviewModal && (
         <ReviewModal
