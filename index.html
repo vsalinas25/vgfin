@@ -1773,7 +1773,7 @@ function Dashboard({ expenses, revenue, showModal, onRefresh, session, pendingRe
   const ytdResult = ytdRev - ytdExpTotal;
 
   const allRev = revenue.reduce((a,b) => a + (parseFloat(b.amount) || 0), 0);
-  const allPaid = expenses.reduce((a,b) => a + (parseFloat(b.amount) || 0), 0);
+  const allPaid = expenses.filter(e => e.status === 'pago').reduce((a,b) => a + (parseFloat(b.amount) || 0), 0);
   const saldoInicial = parseFloat(localStorage.getItem('vg_saldo_inicial') || '0');
   const balance = saldoInicial + allRev - allPaid;
 
