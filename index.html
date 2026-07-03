@@ -1785,6 +1785,31 @@ function Dashboard({ expenses, revenue, showModal, onRefresh, session, pendingRe
     .filter(e => e.status === 'pendente' && e.due_date <= in7ISO)
     .sort((a,b) => a.due_date.localeCompare(b.due_date));
 
+  // Weekly breakdown — next 4 weeks
+  function getWeekBounds(offsetWeeks) {
+    const d = new Date();
+    const day = d.getDay();
+    const monday = new Date(d);
+    monday.setDate(d.getDate() - (day === 0 ? 6 : day - 1) + offsetWeeks * 7);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    return {
+      start: monday.toISOString().split('T')[0],
+      end: sunday.toISOString().split('T')[0],
+      label: offsetWeeks === 0 ? 'Esta semana' : offsetWeeks === 1 ? 'Próxima semana' : `Semana +${offsetWeeks}`,
+    };
+  }
+
+  const weeklyData = [0, 1, 2, 3].map(offset => {
+    const { start, end, label } = getWeekBounds(offset);
+    const items = expenses.filter(e =>
+      e.status === 'pendente' && e.due_date >= start && e.due_date <= end
+    );
+    const total = items.reduce((a, b) => a + (parseFloat(b.amount) || 0), 0);
+    const overdue = offset === 0 ? expenses.filter(e => e.status === 'pendente' && e.due_date < start).reduce((a, b) => a + (parseFloat(b.amount) || 0), 0) : 0;
+    return { label, start, end, total, count: items.length, overdue };
+  });
+
   useEffect(() => {
     if (!chartRef.current) return;
     const months = [];
@@ -1880,6 +1905,47 @@ function Dashboard({ expenses, revenue, showModal, onRefresh, session, pendingRe
         <div className="chart-title">Receita vs. Despesas</div>
         <div className="chart-sub">Últimos 6 meses</div>
         <canvas ref={chartRef} height={80} />
+      </div>
+
+      {/* Weekly breakdown */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 12 }}>
+          Gastos por Semana — Pendentes
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+          {weeklyData.map((w, i) => (
+            <div key={i} style={{
+              background: '#fff',
+              border: `1px solid ${i === 0 && w.total > 0 ? 'var(--danger)' : 'var(--border)'}`,
+              borderRadius: 'var(--radius)',
+              padding: '14px 16px',
+              position: 'relative',
+              overflow: 'hidden',
+            }}>
+              {i === 0 && (
+                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3,
+                  background: w.total > 0 ? 'var(--danger)' : 'var(--green)' }} />
+              )}
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
+                color: i === 0 ? 'var(--danger)' : 'var(--muted)', marginBottom: 6 }}>{w.label}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 20, fontWeight: 700,
+                color: w.total > 0 ? '#000' : 'var(--muted)' }}>
+                {w.total > 0 ? fmtBRL(w.total) : '—'}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                {w.count > 0 ? `${w.count} despesa${w.count > 1 ? 's' : ''}` : 'Nenhuma despesa'}
+              </div>
+              {w.overdue > 0 && (
+                <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 4, fontWeight: 600 }}>
+                  ⚠ {fmtBRL(w.overdue)} vencido
+                </div>
+              )}
+              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6 }}>
+                {w.start.split('-').reverse().slice(0,2).join('/')} – {w.end.split('-').reverse().slice(0,2).join('/')}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="upcoming-card">
