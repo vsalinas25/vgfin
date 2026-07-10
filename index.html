@@ -951,6 +951,15 @@ const PAYMENT_METHODS = ['PIX','Boleto','Cartão C6','Dinheiro','Débito Automá
 const SUPPLIER_CATEGORIES = ['Laticínios/Frios','Carnes','Embalagens','Bebidas','Distribuidora','Insumos','Segurança','Energia','Água','Gás','Telefonia','Associação','Motoboys','Contabilidade','Outros'];
 
 /* ═══════════════════════════════════════════════════════
+   CATEGORIES CONTEXT
+═══════════════════════════════════════════════════════ */
+const CategoriesContext = React.createContext({
+  expenseCategories: CATEGORIES,
+  supplierCategories: SUPPLIER_CATEGORIES,
+});
+function useCategories() { return React.useContext(CategoriesContext); }
+
+/* ═══════════════════════════════════════════════════════
    TOAST MANAGER
 ═══════════════════════════════════════════════════════ */
 let _toastId = 0;
@@ -5976,6 +5985,7 @@ function App() {
   const [receivables, setReceivables] = useState([]);
   const [expenseRequests, setExpenseRequests] = useState([]);
   const [activityLog, setActivityLog] = useState([]);
+  const [dbCategories, setDbCategories] = useState({ expense: [], supplier: [] });
 
   // Keep session in a ref so callbacks always have the latest value
   const sessionRef = useRef(null);
@@ -6078,6 +6088,17 @@ function App() {
       } catch(profErr) {
         console.error('Profile load error:', profErr);
       }
+
+      // categories — non-blocking
+      sb.from('categories').select('*').order('name')
+        .then(({ data }) => {
+          if (data) {
+            const grouped = { expense: [], supplier: [] };
+            data.forEach(c => { if (grouped[c.type]) grouped[c.type].push(c.name); });
+            setDbCategories(grouped);
+          }
+        })
+        .catch(e => console.warn('categories load failed:', e));
 
       // expense_items — non-blocking
       sb.from('expense_items').select('*')
@@ -6258,7 +6279,11 @@ function App() {
     ...(isOwner ? [{ id: 'config', label: 'Configurações', shortLabel: 'Config', icon: '⊙' }] : []),
   ];
 
+  const expenseCategories = dbCategories.expense.length > 0 ? dbCategories.expense : CATEGORIES;
+  const supplierCategories = dbCategories.supplier.length > 0 ? dbCategories.supplier : SUPPLIER_CATEGORIES;
+
   return (
+    <CategoriesContext.Provider value={{ expenseCategories, supplierCategories }}>
     <div className="app">
       {/* SIDEBAR */}
       <div className="sidebar">
@@ -6430,6 +6455,7 @@ function App() {
         </div>
       )}
     </div>
+    </CategoriesContext.Provider>
   );
 }
 
