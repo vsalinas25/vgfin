@@ -19,8 +19,6 @@
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
 :root {
   --black: #000000;
@@ -322,6 +320,8 @@ html, body { height: 100%; font-family: var(--font-ui); background: var(--offwhi
 .btn-danger:hover { background: var(--danger); color: #fff; }
 .btn-sm { padding: 5px 10px; font-size: 10px; }
 .btn-ghost { background: transparent; border-color: transparent; color: var(--muted); }
+.btn-outline { background: transparent; color: var(--black); border: 1px solid var(--border); }
+.btn-outline:hover { border-color: var(--black); }
 .btn-ghost:hover { color: var(--black); background: #f0ece6; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
@@ -717,6 +717,8 @@ canvas { max-width: 100%; }
 }
 
 /* ── NF UPLOAD & ITEMS ───────────────────────────────── */
+.nf-dropzone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 32px 20px; text-align: center; cursor: pointer; transition: border-color 0.15s, background 0.15s; background: #faf8f4; }
+.nf-dropzone.drag-over { border-color: var(--green); background: #f0fff4; }
 .nf-upload-zone {
   border: 2px dashed var(--border); border-radius: var(--radius);
   padding: 20px; text-align: center; cursor: pointer;
@@ -951,15 +953,6 @@ const PAYMENT_METHODS = ['PIX','Boleto','Cartão C6','Dinheiro','Débito Automá
 const SUPPLIER_CATEGORIES = ['Laticínios/Frios','Carnes','Embalagens','Bebidas','Distribuidora','Insumos','Segurança','Energia','Água','Gás','Telefonia','Associação','Motoboys','Contabilidade','Outros'];
 
 /* ═══════════════════════════════════════════════════════
-   CATEGORIES CONTEXT
-═══════════════════════════════════════════════════════ */
-const CategoriesContext = React.createContext({
-  expenseCategories: CATEGORIES,
-  supplierCategories: SUPPLIER_CATEGORIES,
-});
-function useCategories() { return React.useContext(CategoriesContext); }
-
-/* ═══════════════════════════════════════════════════════
    TOAST MANAGER
 ═══════════════════════════════════════════════════════ */
 let _toastId = 0;
@@ -1094,7 +1087,7 @@ Regras: due_date = vencimento do boleto/duplicata (YYYY-MM-DD). amount = valor t
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
+      model: 'claude-sonnet-4-20250514',
       max_tokens: 4000,
       messages: [{ role: 'user', content: [documentBlock, { type: 'text', text: prompt }] }]
     })
@@ -1785,43 +1778,6 @@ function Dashboard({ expenses, revenue, showModal, onRefresh, session, pendingRe
     .filter(e => e.status === 'pendente' && e.due_date <= in7ISO)
     .sort((a,b) => a.due_date.localeCompare(b.due_date));
 
-  // Weekly breakdown — uses local date strings to avoid UTC offset bug
-  function getWeekBoundsLocal(offsetWeeks) {
-    const now = new Date();
-    const localISO = now.getFullYear() + '-' +
-      String(now.getMonth()+1).padStart(2,'0') + '-' +
-      String(now.getDate()).padStart(2,'0');
-    const d = new Date(localISO + 'T00:00:00');
-    const day = d.getDay();
-    const diffToMonday = day === 0 ? -6 : 1 - day;
-    const monday = new Date(d);
-    monday.setDate(d.getDate() + diffToMonday + offsetWeeks * 7);
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
-    const toISO = dt => dt.getFullYear() + '-' +
-      String(dt.getMonth()+1).padStart(2,'0') + '-' +
-      String(dt.getDate()).padStart(2,'0');
-    return {
-      start: toISO(monday),
-      end: toISO(sunday),
-      label: offsetWeeks === 0 ? 'Esta semana' : offsetWeeks === 1 ? 'Próxima semana' : `Semana +${offsetWeeks}`,
-    };
-  }
-
-  const weeklyData = [0, 1, 2, 3].map(offset => {
-    const { start, end, label } = getWeekBoundsLocal(offset);
-    const items = expenses.filter(e =>
-      e.status === 'pendente' && e.due_date >= start && e.due_date <= end
-    );
-    const total = items.reduce((a, b) => a + (parseFloat(b.amount) || 0), 0);
-    const overdueItems = offset === 0
-      ? expenses.filter(e => e.status === 'pendente' && e.due_date < start)
-      : [];
-    const overdue = overdueItems.reduce((a, b) => a + (parseFloat(b.amount) || 0), 0);
-    const fmt = d => d.slice(8,10) + '/' + d.slice(5,7);
-    return { label, start, end, total, count: items.length, overdue, overdueCount: overdueItems.length, fmt };
-  });
-
   useEffect(() => {
     if (!chartRef.current) return;
     const months = [];
@@ -1919,42 +1875,6 @@ function Dashboard({ expenses, revenue, showModal, onRefresh, session, pendingRe
         <canvas ref={chartRef} height={80} />
       </div>
 
-      {/* Weekly breakdown */}
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 10 }}>
-          Gastos Pendentes por Semana
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
-          {weeklyData.map((w, i) => (
-            <div key={i} style={{
-              background: '#fff',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius)',
-              padding: '12px 14px',
-              borderTop: `3px solid ${i === 0 ? (w.total > 0 ? 'var(--danger)' : 'var(--green)') : 'var(--border)'}`,
-            }}>
-              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
-                color: i === 0 ? 'var(--fg)' : 'var(--muted)', marginBottom: 6 }}>{w.label}</div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 700,
-                color: w.total > 0 ? (i === 0 ? 'var(--danger)' : '#000') : 'var(--muted)' }}>
-                {w.total > 0 ? fmtBRL(w.total) : '—'}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>
-                {w.count > 0 ? `${w.count} despesa${w.count > 1 ? 's' : ''}` : 'Nenhuma'}
-              </div>
-              {w.overdue > 0 && (
-                <div style={{ fontSize: 10, color: 'var(--danger)', marginTop: 4, fontWeight: 600 }}>
-                  ⚠ {fmtBRL(w.overdue)} vencido ({w.overdueCount})
-                </div>
-              )}
-              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 5, fontFamily: 'var(--font-mono)' }}>
-                {w.start.slice(8,10)}/{w.start.slice(5,7)} – {w.end.slice(8,10)}/{w.end.slice(5,7)}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
       <div className="upcoming-card">
         <div className="upcoming-header">⏰ Próximos Vencimentos — 7 dias</div>
         {upcoming.length === 0 ? (
@@ -2048,284 +1968,7 @@ function PagarModal({ expense, onConfirm, onClose }) {
 /* ═══════════════════════════════════════════════════════
    MODULE 2 — CONTAS A PAGAR
 ═══════════════════════════════════════════════════════ */
-
-/* ═══════════════════════════════════════════════════════
-   FATURA IMPORTER — Cartão de Crédito
-═══════════════════════════════════════════════════════ */
-function FaturaImporter({ suppliers, onImport, onClose }) {
-  const { expenseCategories } = useCategories();
-  const [stage, setStage] = useState('upload'); // upload | processing | preview
-  const [dragging, setDragging] = useState(false);
-  const [rows, setRows] = useState([]);
-  const [saving, setSaving] = useState(false);
-  const [cartaoNome, setCartaoNome] = useState('');
-  const fileRef = React.useRef();
-
-  async function processFile(file) {
-    setStage('processing');
-    try {
-      const base64 = await new Promise((res, rej) => {
-        const r = new FileReader();
-        r.onload = () => res(r.result.split(',')[1]);
-        r.onerror = () => rej(new Error('Falha ao ler arquivo'));
-        r.readAsDataURL(file);
-      });
-
-      const isPdf = file.type === 'application/pdf';
-      const mediaType = isPdf ? 'application/pdf' : file.type;
-
-      const messages = [{
-        role: 'user',
-        content: [
-          {
-            type: isPdf ? 'document' : 'image',
-            source: { type: 'base64', media_type: mediaType, data: base64 }
-          },
-          {
-            type: 'text',
-            text: `Você está analisando uma fatura de cartão de crédito empresarial brasileiro.
-
-Extraia TODAS as transações de compra/despesa visíveis. Para cada transação retorne:
-- date: data da COMPRA no formato YYYY-MM-DD (não a data de vencimento da fatura)
-- description: nome do estabelecimento/fornecedor exatamente como aparece
-- amount: valor em reais da PARCELA (número positivo, ponto decimal, sem R$)
-- category: classifique em UMA dessas categorias exatas: "Compras", "Gastos Fixos", "Gastos Variáveis", "Gastos Gerais", "Impostos", "Salários". Escolha a mais adequada para cada transação.
-- installment: parcela atual e total se houver (ex: "3/12"), ou "Única" se não for parcelado
-
-NÃO inclua: estornos ou valores negativos (créditos na fatura).
-
-Retorne APENAS um array JSON válido, sem texto adicional, sem markdown.
-Exemplo: [{"date":"2026-06-05","description":"FACEBK ADS","amount":351.11,"category":"Gastos Variáveis","installment":"Única"}]
-
-Se não encontrar transações, retorne: []`
-          }
-        ]
-      }];
-
-      const res = await fetch('https://dawn-cell-9729.vittoegiulio.workers.dev', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 4000, messages }),
-      });
-
-      const data = await res.json();
-      const text = data.content?.[0]?.text || '[]';
-      const clean = text.replace(/```json|```/g, '').trim();
-      const parsed = JSON.parse(clean);
-
-      if (!Array.isArray(parsed) || parsed.length === 0) {
-        toast('Nenhuma transação encontrada na fatura.', 'error');
-        setStage('upload');
-        return;
-      }
-
-      // Normalize categories to match available options
-      setRows(parsed.map((r, i) => ({ ...r, _id: i, _selected: true, _rawCategory: r.category })));
-      setStage('preview');
-    } catch (err) {
-      toast('Erro ao processar: ' + err.message, 'error');
-      setStage('upload');
-    }
-  }
-
-  function handleDrop(e) {
-    e.preventDefault();
-    setDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file) processFile(file);
-  }
-
-  function toggleRow(id) {
-    setRows(prev => prev.map(r => r._id === id ? { ...r, _selected: !r._selected } : r));
-  }
-
-  function updateRow(id, field, value) {
-    setRows(prev => prev.map(r => r._id === id ? { ...r, [field]: value } : r));
-  }
-
-  function removeRow(id) {
-    setRows(prev => prev.filter(r => r._id !== id));
-  }
-
-  function getWeekRange(dateStr) {
-    if (!dateStr) return '';
-    const d = new Date(dateStr + 'T00:00:00');
-    const day = d.getDay();
-    const monday = new Date(d);
-    monday.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
-    const fmt = dt => String(dt.getDate()).padStart(2,'0') + '/' + String(dt.getMonth()+1).padStart(2,'0');
-    return fmt(monday) + ' – ' + fmt(sunday);
-  }
-
-  async function handleSave() {
-    const selected = rows.filter(r => r._selected);
-    if (selected.length === 0) { toast('Selecione ao menos uma transação.', 'error'); return; }
-    setSaving(true);
-    try {
-      const user = (await sb.auth.getUser()).data.user;
-      const toInsert = selected.map(r => ({
-        due_date: r.date,
-        supplier_name: r.description,
-        amount: parseFloat(r.amount),
-        category: r.category || 'Gastos Variáveis',
-        status: 'pago',
-        payment_method: 'Cartão ' + (cartaoNome || 'Crédito'),
-        notes: r.installment && r.installment !== 'Única' ? 'Parcela ' + r.installment : '',
-        week_range: getWeekRange(r.date),
-        created_by: user.id,
-      }));
-      const { error } = await sb.from('expenses').insert(toInsert);
-      if (error) { toast('Erro ao salvar: ' + error.message, 'error'); setSaving(false); return; }
-      toast(selected.length + ' transação(ões) importada(s) com sucesso!', 'success');
-      onImport();
-      onClose();
-    } catch (err) {
-      toast('Erro: ' + err.message, 'error');
-    }
-    setSaving(false);
-  }
-
-  const selectedCount = rows.filter(r => r._selected).length;
-  const selectedTotal = rows.filter(r => r._selected).reduce((a, r) => a + parseFloat(r.amount || 0), 0);
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-box" style={{ maxWidth: stage === 'preview' ? 860 : 460, width: '96vw' }} onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <div className="modal-title">
-            {stage === 'upload' && '💳 Importar Fatura de Cartão'}
-            {stage === 'processing' && 'Processando fatura...'}
-            {stage === 'preview' && 'Transações Extraídas — Revisão'}
-          </div>
-          <button className="modal-close" onClick={onClose}>✕</button>
-        </div>
-
-        <div style={{ padding: '20px 24px 24px' }}>
-          {stage === 'upload' && (
-            <>
-              <div style={{ marginBottom: 14 }}>
-                <label className="form-label">Nome do Cartão (opcional)</label>
-                <input className="form-control" placeholder="Ex: C6 Business 9517"
-                  value={cartaoNome} onChange={e => setCartaoNome(e.target.value)} />
-              </div>
-              <div
-                className={`nf-dropzone${dragging ? ' drag-over' : ''}`}
-                style={{ marginBottom: 12 }}
-                onDragOver={e => { e.preventDefault(); setDragging(true); }}
-                onDragLeave={() => setDragging(false)}
-                onDrop={handleDrop}
-                onClick={() => fileRef.current.click()}
-              >
-                <div style={{ fontSize: 32, marginBottom: 8 }}>💳</div>
-                <div style={{ fontWeight: 600, marginBottom: 4 }}>Fatura do Cartão</div>
-                <div style={{ fontSize: 12, color: 'var(--muted)' }}>PDF, PNG, JPG ou WEBP · Arraste ou clique</div>
-                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-                  O sistema extrai cada compra individualmente com a data real
-                </div>
-              </div>
-              <input ref={fileRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }}
-                onChange={e => e.target.files[0] && processFile(e.target.files[0])} />
-              <div style={{ background: '#f5f2ed', borderRadius: 4, padding: '10px 12px', fontSize: 11, color: 'var(--muted)' }}>
-                <strong>Regime de competência:</strong> cada compra é lançada na data real da compra, não na data do pagamento da fatura. Estornos e créditos são ignorados automaticamente.
-              </div>
-            </>
-          )}
-
-          {stage === 'processing' && (
-            <div style={{ textAlign: 'center', padding: '40px 0' }}>
-              <div style={{ fontSize: 32, marginBottom: 16 }}>⏳</div>
-              <div style={{ fontWeight: 600, marginBottom: 8 }}>Analisando fatura...</div>
-              <div style={{ fontSize: 13, color: 'var(--muted)' }}>O Claude está lendo cada transação individualmente</div>
-            </div>
-          )}
-
-          {stage === 'preview' && (
-            <>
-              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
-                Revise as transações. Desmarque encargos pessoais ou itens incorretos. Você pode editar data, descrição, categoria e valor.
-              </div>
-              <div style={{ overflowX: 'auto', marginBottom: 12 }}>
-                <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '2px solid var(--border)', background: '#f5f2ed' }}>
-                      <th style={{ padding: '6px 6px', textAlign: 'left', width: 28 }}></th>
-                      <th style={{ padding: '6px 6px', textAlign: 'left', width: 90 }}>Data</th>
-                      <th style={{ padding: '6px 6px', textAlign: 'left' }}>Descrição</th>
-                      <th style={{ padding: '6px 6px', textAlign: 'left', width: 130 }}>Categoria</th>
-                      <th style={{ padding: '6px 6px', textAlign: 'center', width: 60 }}>Parcela</th>
-                      <th style={{ padding: '6px 6px', textAlign: 'right', width: 90 }}>Valor</th>
-                      <th style={{ padding: '6px 6px', width: 24 }}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map(r => (
-                      <tr key={r._id} style={{ borderBottom: '1px solid var(--border)', opacity: r._selected ? 1 : 0.35, background: r._selected ? 'transparent' : '#fafafa' }}>
-                        <td style={{ padding: '3px 6px' }}>
-                          <input type="checkbox" checked={r._selected} onChange={() => toggleRow(r._id)} />
-                        </td>
-                        <td style={{ padding: '3px 4px' }}>
-                          <input type="date" value={r.date} onChange={e => updateRow(r._id, 'date', e.target.value)}
-                            style={{ border: 'none', background: 'transparent', fontSize: 11, width: 110 }} />
-                        </td>
-                        <td style={{ padding: '3px 4px' }}>
-                          <input type="text" value={r.description} onChange={e => updateRow(r._id, 'description', e.target.value)}
-                            style={{ border: 'none', background: 'transparent', fontSize: 11, width: '100%', minWidth: 160 }} />
-                        </td>
-                        <td style={{ padding: '3px 4px' }}>
-                          <select value={expenseCategories.includes(r.category) ? r.category : expenseCategories[0]}
-                            onChange={e => updateRow(r._id, 'category', e.target.value)}
-                            style={{ border: 'none', background: 'transparent', fontSize: 11, width: '100%' }}>
-                            {expenseCategories.map(c => <option key={c}>{c}</option>)}
-                          </select>
-                        </td>
-                        <td style={{ padding: '3px 4px', textAlign: 'center', fontSize: 10, color: 'var(--muted)' }}>
-                          {r.installment || '—'}
-                        </td>
-                        <td style={{ padding: '3px 4px', textAlign: 'right' }}>
-                          <input type="number" value={r.amount} onChange={e => updateRow(r._id, 'amount', e.target.value)}
-                            style={{ border: 'none', background: 'transparent', fontSize: 11, textAlign: 'right', width: 80,
-                              color: 'var(--danger)', fontFamily: 'var(--font-mono)', fontWeight: 600 }} />
-                        </td>
-                        <td style={{ padding: '3px 4px' }}>
-                          <button onClick={() => removeRow(r._id)}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 12 }}>✕</button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                background: '#f5f2ed', borderRadius: 4, padding: '10px 14px', marginBottom: 14 }}>
-                <div>
-                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>{selectedCount} transação(ões) selecionada(s) · </span>
-                  <span style={{ fontSize: 11, color: 'var(--muted)' }}>Status: <strong>Pago</strong> · Data: data da compra</span>
-                </div>
-                <span style={{ fontWeight: 700, color: 'var(--danger)', fontFamily: 'var(--font-mono)', fontSize: 15 }}>
-                  {fmtBRL(selectedTotal)}
-                </span>
-              </div>
-
-              <div style={{ display: 'flex', gap: 10 }}>
-                <button className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>Cancelar</button>
-                <button className="btn btn-primary" style={{ flex: 2 }} onClick={handleSave}
-                  disabled={saving || selectedCount === 0}>
-                  {saving ? 'Salvando...' : `Importar ${selectedCount} transação(ões) — ${fmtBRL(selectedTotal)}`}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isOwner }) {
-  const [faturaModal, setFaturaModal] = useState(false);
   const [filter, setFilter] = useState({ status: 'todos', category: '', search: '', from: '', to: '', week: '' });
   const [itemsModal, setItemsModal] = useState(null);
   const [codigoModal, setCodigoModal] = useState(null);
@@ -2473,10 +2116,7 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
           <div className="page-title">Contas a Pagar</div>
           {overdueCount > 0 && <div className="page-subtitle" style={{ color: 'var(--danger)', fontWeight: 600 }}>⚠ {overdueCount} vencida{overdueCount > 1 ? 's' : ''}</div>}
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-outline" onClick={() => setFaturaModal(true)}>💳 Importar Fatura</button>
-          <button className="btn btn-primary" onClick={() => setModal({ type: 'new' })}>+ Nova Despesa</button>
-        </div>
+        <button className="btn btn-primary" onClick={() => setModal({ type: 'new' })}>+ Nova Despesa</button>
       </div>
 
       <div className="weekly-summary">
@@ -2644,14 +2284,6 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
       )}
 
       <button className="fab" onClick={() => setModal({ type: 'new' })} title="Nova Despesa (N)">+</button>
-
-      {faturaModal && (
-        <FaturaImporter
-          suppliers={suppliers}
-          onImport={onRefresh}
-          onClose={() => setFaturaModal(false)}
-        />
-      )}
     </div>
   );
 }
@@ -3629,9 +3261,248 @@ function ReviewModal({ req, onApprove, onReject, onClose }) {
 /* ═══════════════════════════════════════════════════════
    MODULE — RECEITAS
 ═══════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════
+   EXTRATO IMPORTER — Importar extrato bancário Itaú
+═══════════════════════════════════════════════════════ */
+function ExtratoImporter({ onImport, onClose }) {
+  const [stage, setStage] = useState('upload');
+  const [dragging, setDragging] = useState(false);
+  const [rows, setRows] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const fileRef = useRef(null);
+
+  async function processFile(file) {
+    setStage('processing');
+    try {
+      const base64 = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result.split(',')[1]);
+        r.onerror = () => rej(new Error('Falha ao ler arquivo'));
+        r.readAsDataURL(file);
+      });
+
+      const isPdf = file.type === 'application/pdf';
+      const mediaType = isPdf ? 'application/pdf' : file.type;
+
+      const messages = [{
+        role: 'user',
+        content: [
+          {
+            type: isPdf ? 'document' : 'image',
+            source: { type: 'base64', media_type: mediaType, data: base64 }
+          },
+          {
+            type: 'text',
+            text: `Você está analisando um extrato bancário do Itaú. Extraia TODAS as transações de ENTRADA (créditos) visíveis.
+
+Para cada entrada, retorne um objeto JSON com:
+- date: data no formato YYYY-MM-DD
+- description: descrição da transação (exatamente como aparece)
+- amount: valor numérico positivo (sem R$, sem pontos de milhar, use ponto decimal)
+- tipo: "operacional" se parecer venda/receita do negócio, "nao_operacional" caso contrário
+
+Retorne APENAS um array JSON válido, sem texto adicional, sem markdown, sem explicações.
+Exemplo: [{"date":"2026-06-01","description":"PIX RECEBIDO FULANO","amount":1500.00,"tipo":"operacional"}]
+
+Se não encontrar entradas, retorne: []`
+          }
+        ]
+      }];
+
+      const res = await fetch('https://dawn-cell-9729.vittoegiulio.workers.dev', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2000, messages }),
+      });
+
+      const data = await res.json();
+      const text = data.content?.[0]?.text || '[]';
+      const clean = text.replace(/```json|```/g, '').trim();
+      const parsed = JSON.parse(clean);
+
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        toast('Nenhuma entrada encontrada no extrato.', 'error');
+        setStage('upload');
+        return;
+      }
+
+      setRows(parsed.map((r, i) => ({ ...r, _id: i, _selected: true })));
+      setStage('preview');
+    } catch (err) {
+      toast('Erro ao processar: ' + err.message, 'error');
+      setStage('upload');
+    }
+  }
+
+  function handleDrop(e) {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) processFile(file);
+  }
+
+  function toggleRow(id) {
+    setRows(prev => prev.map(r => r._id === id ? { ...r, _selected: !r._selected } : r));
+  }
+
+  function updateRow(id, field, value) {
+    setRows(prev => prev.map(r => r._id === id ? { ...r, [field]: value } : r));
+  }
+
+  function removeRow(id) {
+    setRows(prev => prev.filter(r => r._id !== id));
+  }
+
+  async function handleSave() {
+    const selected = rows.filter(r => r._selected);
+    if (selected.length === 0) { toast('Selecione ao menos uma entrada.', 'error'); return; }
+    setSaving(true);
+    try {
+      const user = (await sb.auth.getUser()).data.user;
+      const toInsert = selected.map(r => ({
+        date: r.date,
+        month: r.date.slice(0, 7),
+        amount: parseFloat(r.amount),
+        notes: r.description,
+        cliente: r.description,
+        tipo: r.tipo,
+        created_by: user.id,
+      }));
+      const { error } = await sb.from('revenue').insert(toInsert);
+      if (error) { toast('Erro ao salvar: ' + error.message, 'error'); setSaving(false); return; }
+      toast(selected.length + ' entrada(s) importada(s) com sucesso!', 'success');
+      onImport();
+      onClose();
+    } catch (err) {
+      toast('Erro: ' + err.message, 'error');
+    }
+    setSaving(false);
+  }
+
+  const selectedCount = rows.filter(r => r._selected).length;
+  const selectedTotal = rows.filter(r => r._selected).reduce((a, r) => a + parseFloat(r.amount || 0), 0);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{ maxWidth: stage === 'preview' ? 800 : 480, width: '95vw' }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">
+            {stage === 'upload' && 'Importar Extrato Itaú'}
+            {stage === 'processing' && 'Processando...'}
+            {stage === 'preview' && 'Pré-visualização das Entradas'}
+          </div>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+
+        <div style={{ padding: '20px 24px 24px' }}>
+          {stage === 'upload' && (
+            <>
+              <div
+                className={`nf-dropzone${dragging ? ' drag-over' : ''}`}
+                style={{ marginBottom: 16 }}
+                onDragOver={e => { e.preventDefault(); setDragging(true); }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={handleDrop}
+                onClick={() => fileRef.current.click()}
+              >
+                <div style={{ fontSize: 32, marginBottom: 8 }}>🏦</div>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>Extrato Itaú</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>PNG, JPG, WEBP ou PDF · Arraste ou clique</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>O sistema extrai as entradas automaticamente via IA</div>
+              </div>
+              <input ref={fileRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }}
+                onChange={e => e.target.files[0] && processFile(e.target.files[0])} />
+              <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center' }}>
+                Funciona com prints de tela ou PDF do app/internet banking Itaú
+              </div>
+            </>
+          )}
+
+          {stage === 'processing' && (
+            <div style={{ textAlign: 'center', padding: '40px 0' }}>
+              <div style={{ fontSize: 32, marginBottom: 16 }}>⏳</div>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Analisando extrato...</div>
+              <div style={{ fontSize: 13, color: 'var(--muted)' }}>O Claude está lendo as transações do extrato</div>
+            </div>
+          )}
+
+          {stage === 'preview' && (
+            <>
+              <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>
+                Revise as entradas extraídas. Desmarque ou edite o que não estiver correto antes de salvar.
+              </div>
+              <div style={{ overflowX: 'auto', marginBottom: 16 }}>
+                <table style={{ width: '100%', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                      <th style={{ padding: '6px 8px', textAlign: 'left', width: 32 }}></th>
+                      <th style={{ padding: '6px 8px', textAlign: 'left' }}>Data</th>
+                      <th style={{ padding: '6px 8px', textAlign: 'left' }}>Descrição</th>
+                      <th style={{ padding: '6px 8px', textAlign: 'left' }}>Tipo</th>
+                      <th style={{ padding: '6px 8px', textAlign: 'right' }}>Valor</th>
+                      <th style={{ padding: '6px 8px', width: 32 }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map(r => (
+                      <tr key={r._id} style={{ borderBottom: '1px solid var(--border)', opacity: r._selected ? 1 : 0.4 }}>
+                        <td style={{ padding: '4px 8px' }}>
+                          <input type="checkbox" checked={r._selected} onChange={() => toggleRow(r._id)} />
+                        </td>
+                        <td style={{ padding: '4px 8px' }}>
+                          <input type="date" value={r.date} onChange={e => updateRow(r._id, 'date', e.target.value)}
+                            style={{ border: 'none', background: 'transparent', fontSize: 12, width: 120 }} />
+                        </td>
+                        <td style={{ padding: '4px 8px' }}>
+                          <input type="text" value={r.description} onChange={e => updateRow(r._id, 'description', e.target.value)}
+                            style={{ border: 'none', background: 'transparent', fontSize: 12, width: '100%', minWidth: 180 }} />
+                        </td>
+                        <td style={{ padding: '4px 8px' }}>
+                          <select value={r.tipo} onChange={e => updateRow(r._id, 'tipo', e.target.value)}
+                            style={{ border: 'none', background: 'transparent', fontSize: 12 }}>
+                            <option value="operacional">Operacional</option>
+                            <option value="nao_operacional">Não Operacional</option>
+                          </select>
+                        </td>
+                        <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--green)' }}>
+                          <input type="number" value={r.amount} onChange={e => updateRow(r._id, 'amount', e.target.value)}
+                            style={{ border: 'none', background: 'transparent', fontSize: 12, textAlign: 'right', width: 90, color: 'var(--green)', fontFamily: 'var(--font-mono)' }} />
+                        </td>
+                        <td style={{ padding: '4px 8px', textAlign: 'center' }}>
+                          <button onClick={() => removeRow(r._id)}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 14 }}>✕</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16,
+                background: '#f5f2ed', borderRadius: 4, padding: '10px 14px' }}>
+                <span style={{ fontSize: 13, color: 'var(--muted)' }}>{selectedCount} entrada(s) selecionada(s)</span>
+                <span style={{ fontWeight: 700, color: 'var(--green)', fontFamily: 'var(--font-mono)' }}>
+                  {fmtBRL(selectedTotal)}
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button className="btn btn-secondary" style={{ flex: 1 }} onClick={onClose}>Cancelar</button>
+                <button className="btn btn-primary" style={{ flex: 2 }} onClick={handleSave} disabled={saving || selectedCount === 0}>
+                  {saving ? 'Salvando...' : `Importar ${selectedCount} entrada(s)`}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Receitas({ revenue, setRevenue, onRefresh, session }) {
   const [modal, setModal] = useState(null); // null | {mode:'new'} | {mode:'edit', rec}
   const [confirm, setConfirm] = useState(null);
+  const [extratoModal, setExtratoModal] = useState(false);
   const [filter, setFilter] = useState({ type: 'todos', from: '', to: '', cliente: '' });
 
   const filtered = revenue.filter(r => {
@@ -3688,7 +3559,10 @@ function Receitas({ revenue, setRevenue, onRefresh, session }) {
           <div className="page-title">Receitas</div>
           <div className="page-subtitle">Registro de receitas operacionais e não operacionais</div>
         </div>
-        <button className="btn btn-primary" onClick={() => setModal({ mode: 'new' })}>+ Nova Receita</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-outline" onClick={() => setExtratoModal(true)}>📎 Importar Extrato</button>
+          <button className="btn btn-primary" onClick={() => setModal({ mode: 'new' })}>+ Nova Receita</button>
+        </div>
       </div>
 
       {/* Summary bar */}
@@ -3775,6 +3649,14 @@ function Receitas({ revenue, setRevenue, onRefresh, session }) {
           </tbody>
         </table>
       </div>
+
+      {/* Extrato Importer */}
+      {extratoModal && (
+        <ExtratoImporter
+          onImport={onRefresh}
+          onClose={() => setExtratoModal(false)}
+        />
+      )}
 
       {/* Modal */}
       {modal && (
@@ -4534,406 +4416,6 @@ function PriceEvolutionChart({ expenseItems, expenses }) {
 /* ═══════════════════════════════════════════════════════
    MODULE 5 — RELATÓRIOS
 ═══════════════════════════════════════════════════════ */
-
-/* ═══════════════════════════════════════════════════════
-   PDF REPORT GENERATOR
-═══════════════════════════════════════════════════════ */
-function generateExecutiveReport({ expenses, revenue, saldoInicial }) {
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const PAGE_W = 210;
-  const PAGE_H = 297;
-  const MARGIN = 16;
-  const COL_W = PAGE_W - MARGIN * 2;
-  const GREEN = [25, 144, 58];
-  const BLACK = [0, 0, 0];
-  const GRAY = [120, 120, 120];
-  const LIGHT = [245, 242, 237];
-
-  const now = new Date();
-  const currentMonth = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
-  const fmtBRL = v => 'R$ ' + parseFloat(v||0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const fmtDate = s => s ? s.split('-').reverse().join('/') : '—';
-
-  // ── Months last 12
-  const months12 = Array.from({length:12},(_,i) => {
-    const d = new Date(now.getFullYear(), now.getMonth()-11+i, 1);
-    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
-  });
-  const getMonthLabel = m => {
-    const [y,mo] = m.split('-');
-    const names = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
-    return names[parseInt(mo)-1] + '/' + y.slice(2);
-  };
-
-  // ── Totals
-  const allRev = revenue.reduce((a,b) => a + parseFloat(b.amount||0), 0);
-  const allPaid = expenses.filter(e=>e.status==='pago').reduce((a,b) => a + parseFloat(b.amount||0), 0);
-  const allExp = expenses.reduce((a,b) => a + parseFloat(b.amount||0), 0);
-  const balance = saldoInicial + allRev - allPaid;
-  const ytdRev = revenue.filter(r=>r.month?.startsWith(now.getFullYear().toString())).reduce((a,b)=>a+parseFloat(b.amount||0),0);
-  const ytdExp = expenses.filter(e=>e.due_date?.startsWith(now.getFullYear().toString())).reduce((a,b)=>a+parseFloat(b.amount||0),0);
-  const ytdResult = ytdRev - ytdExp;
-  const monthRev = revenue.filter(r=>r.month===currentMonth).reduce((a,b)=>a+parseFloat(b.amount||0),0);
-  const monthExp = expenses.filter(e=>e.due_date?.startsWith(currentMonth)&&e.status==='pago').reduce((a,b)=>a+parseFloat(b.amount||0),0);
-  const monthResult = monthRev - monthExp;
-  const margin = monthRev > 0 ? (monthResult/monthRev*100).toFixed(1) : null;
-
-  let y = 0;
-  let page = 1;
-
-  function addPage() {
-    doc.addPage();
-    page++;
-    y = MARGIN + 8;
-    // header line
-    doc.setDrawColor(...GREEN);
-    doc.setLineWidth(0.5);
-    doc.line(MARGIN, 8, PAGE_W - MARGIN, 8);
-    doc.setFontSize(7);
-    doc.setTextColor(...GRAY);
-    doc.text('VITTO & GIULIO PIZZA — Relatório Executivo Financeiro', MARGIN, 12);
-    doc.text(`Página ${page}`, PAGE_W - MARGIN, 12, { align: 'right' });
-  }
-
-  function checkPage(needed) {
-    if (y + needed > PAGE_H - 16) addPage();
-  }
-
-  function sectionTitle(title) {
-    checkPage(16);
-    y += 6;
-    doc.setFillColor(...GREEN);
-    doc.rect(MARGIN, y, COL_W, 7, 'F');
-    doc.setFontSize(9);
-    doc.setTextColor(255, 255, 255);
-    doc.setFont(undefined, 'bold');
-    doc.text(title.toUpperCase(), MARGIN + 3, y + 5);
-    doc.setFont(undefined, 'normal');
-    doc.setTextColor(...BLACK);
-    y += 10;
-  }
-
-  // ══════════════════════════════════════════
-  // COVER PAGE
-  // ══════════════════════════════════════════
-  doc.setFillColor(...BLACK);
-  doc.rect(0, 0, PAGE_W, 60, 'F');
-  doc.setFillColor(...GREEN);
-  doc.rect(0, 60, PAGE_W, 3, 'F');
-
-  doc.setFontSize(28);
-  doc.setTextColor(255, 255, 255);
-  doc.setFont(undefined, 'bold');
-  doc.text('VITTO & GIULIO', PAGE_W/2, 30, { align: 'center' });
-  doc.setFontSize(12);
-  doc.setFont(undefined, 'normal');
-  doc.text('PIZZA — GESTÃO FINANCEIRA', PAGE_W/2, 40, { align: 'center' });
-
-  doc.setTextColor(...BLACK);
-  doc.setFontSize(20);
-  doc.setFont(undefined, 'bold');
-  doc.text('RELATÓRIO EXECUTIVO', PAGE_W/2, 85, { align: 'center' });
-  doc.setFontSize(12);
-  doc.setFont(undefined, 'normal');
-  doc.setTextColor(...GRAY);
-  doc.text('Visão Financeira Completa', PAGE_W/2, 95, { align: 'center' });
-
-  doc.setFontSize(10);
-  doc.setTextColor(...BLACK);
-  doc.text('Período de análise:', PAGE_W/2, 120, { align: 'center' });
-  doc.setFont(undefined, 'bold');
-  doc.text(getMonthLabel(months12[0]) + ' — ' + getMonthLabel(currentMonth), PAGE_W/2, 128, { align: 'center' });
-
-  doc.setFont(undefined, 'normal');
-  doc.setTextColor(...GRAY);
-  doc.setFontSize(9);
-  doc.text('Gerado em: ' + now.toLocaleDateString('pt-BR', { day:'2-digit', month:'long', year:'numeric' }) + ' às ' + now.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' }), PAGE_W/2, 145, { align: 'center' });
-
-  // KPI boxes on cover
-  const kpis = [
-    { label: 'Saldo em Caixa', value: fmtBRL(balance), color: balance >= 0 ? GREEN : [192,57,43] },
-    { label: 'Receita YTD', value: fmtBRL(ytdRev), color: GREEN },
-    { label: 'Despesas YTD', value: fmtBRL(ytdExp), color: BLACK },
-    { label: 'Resultado YTD', value: fmtBRL(ytdResult), color: ytdResult >= 0 ? GREEN : [192,57,43] },
-  ];
-  const kpiW = (COL_W - 9) / 4;
-  kpis.forEach((k, i) => {
-    const kx = MARGIN + i * (kpiW + 3);
-    doc.setFillColor(...LIGHT);
-    doc.roundedRect(kx, 160, kpiW, 28, 2, 2, 'F');
-    doc.setFontSize(7);
-    doc.setTextColor(...GRAY);
-    doc.text(k.label.toUpperCase(), kx + kpiW/2, 167, { align: 'center' });
-    doc.setFontSize(10);
-    doc.setFont(undefined, 'bold');
-    doc.setTextColor(...k.color);
-    doc.text(k.value, kx + kpiW/2, 176, { align: 'center' });
-    doc.setFont(undefined, 'normal');
-    doc.setTextColor(...BLACK);
-  });
-
-  doc.setFontSize(7);
-  doc.setTextColor(...GRAY);
-  doc.text('Documento confidencial — uso interno', PAGE_W/2, PAGE_H - 12, { align: 'center' });
-
-  // ══════════════════════════════════════════
-  // PAGE 2 — SUMÁRIO EXECUTIVO
-  // ══════════════════════════════════════════
-  addPage();
-
-  sectionTitle('1. Sumário Executivo');
-
-  // Key metrics table
-  doc.autoTable({
-    startY: y,
-    margin: { left: MARGIN, right: MARGIN },
-    head: [['Indicador', 'Mês Atual', 'Ano (YTD)']],
-    body: [
-      ['Receita', fmtBRL(monthRev), fmtBRL(ytdRev)],
-      ['Despesas Pagas', fmtBRL(monthExp), fmtBRL(ytdExp)],
-      ['Resultado', fmtBRL(monthResult), fmtBRL(ytdResult)],
-      ['Margem de Lucro', margin ? margin + '%' : '—', ytdRev > 0 ? (ytdResult/ytdRev*100).toFixed(1)+'%' : '—'],
-      ['Saldo em Caixa', fmtBRL(balance), ''],
-    ],
-    styles: { fontSize: 9, cellPadding: 3 },
-    headStyles: { fillColor: BLACK, textColor: 255, fontStyle: 'bold', fontSize: 9 },
-    alternateRowStyles: { fillColor: [250, 248, 245] },
-    columnStyles: { 0: { fontStyle: 'bold' }, 1: { halign: 'right' }, 2: { halign: 'right' } },
-    didParseCell: (data) => {
-      if (data.section === 'body' && data.column.index > 0) {
-        const v = parseFloat(data.cell.raw?.replace(/[R$\s.]/g,'').replace(',','.'));
-        if (!isNaN(v) && v < 0) data.cell.styles.textColor = [192, 57, 43];
-        if (!isNaN(v) && v > 0 && data.row.index < 3) data.cell.styles.textColor = [25, 144, 58];
-      }
-    },
-    theme: 'grid',
-  });
-  y = doc.lastAutoTable.finalY + 8;
-
-  // Pending summary
-  const pendingTotal = expenses.filter(e=>e.status==='pendente').reduce((a,b)=>a+parseFloat(b.amount||0),0);
-  const pendingCount = expenses.filter(e=>e.status==='pendente').length;
-  const overdueCount = expenses.filter(e=>e.status==='pendente' && e.due_date < currentMonth + '-01').length;
-
-  checkPage(20);
-  doc.setFillColor(...LIGHT);
-  doc.rect(MARGIN, y, COL_W, 18, 'F');
-  doc.setFontSize(8);
-  doc.setTextColor(...GRAY);
-  doc.text('CONTAS PENDENTES', MARGIN + 4, y + 5);
-  doc.setFontSize(11);
-  doc.setFont(undefined, 'bold');
-  doc.setTextColor(...BLACK);
-  doc.text(fmtBRL(pendingTotal), MARGIN + 4, y + 13);
-  doc.setFont(undefined, 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(...GRAY);
-  doc.text(`${pendingCount} despesas pendentes${overdueCount > 0 ? ` · ${overdueCount} vencidas` : ''}`, MARGIN + 60, y + 13);
-  y += 22;
-
-  // ══════════════════════════════════════════
-  // DRE — últimos 12 meses
-  // ══════════════════════════════════════════
-  sectionTitle('2. DRE — Demonstrativo de Resultados (12 meses)');
-
-  const dreBody = months12.map(m => {
-    const rev = revenue.filter(r=>r.month===m).reduce((a,b)=>a+parseFloat(b.amount||0),0);
-    const exp = expenses.filter(e=>e.due_date?.startsWith(m)&&e.status==='pago').reduce((a,b)=>a+parseFloat(b.amount||0),0);
-    const res = rev - exp;
-    const mg = rev > 0 ? (res/rev*100).toFixed(1)+'%' : '—';
-    return [getMonthLabel(m), fmtBRL(rev), fmtBRL(exp), fmtBRL(res), mg];
-  });
-
-  const totalRev12 = months12.reduce((a,m)=>a+revenue.filter(r=>r.month===m).reduce((s,b)=>s+parseFloat(b.amount||0),0),0);
-  const totalExp12 = months12.reduce((a,m)=>a+expenses.filter(e=>e.due_date?.startsWith(m)&&e.status==='pago').reduce((s,b)=>s+parseFloat(b.amount||0),0),0);
-  const totalRes12 = totalRev12 - totalExp12;
-
-  dreBody.push(['TOTAL', fmtBRL(totalRev12), fmtBRL(totalExp12), fmtBRL(totalRes12), totalRev12>0?(totalRes12/totalRev12*100).toFixed(1)+'%':'—']);
-
-  doc.autoTable({
-    startY: y,
-    margin: { left: MARGIN, right: MARGIN },
-    head: [['Mês', 'Receita', 'Despesas Pagas', 'Resultado', 'Margem']],
-    body: dreBody,
-    styles: { fontSize: 8, cellPadding: 2.5 },
-    headStyles: { fillColor: BLACK, textColor: 255, fontStyle: 'bold', fontSize: 8 },
-    alternateRowStyles: { fillColor: [250, 248, 245] },
-    columnStyles: { 0:{fontStyle:'bold'}, 1:{halign:'right'}, 2:{halign:'right'}, 3:{halign:'right'}, 4:{halign:'right'} },
-    didParseCell: (data) => {
-      if (data.section === 'body' && (data.column.index === 3)) {
-        const v = parseFloat(data.cell.raw?.replace(/[R$\s.]/g,'').replace(',','.'));
-        if (!isNaN(v) && v < 0) data.cell.styles.textColor = [192, 57, 43];
-        if (!isNaN(v) && v > 0) data.cell.styles.textColor = [25, 144, 58];
-      }
-      if (data.row.index === dreBody.length - 1) {
-        data.cell.styles.fontStyle = 'bold';
-        data.cell.styles.fillColor = [230, 230, 230];
-      }
-    },
-    theme: 'grid',
-  });
-  y = doc.lastAutoTable.finalY + 8;
-
-  // ══════════════════════════════════════════
-  // DESPESAS POR CATEGORIA
-  // ══════════════════════════════════════════
-  sectionTitle('3. Despesas por Categoria');
-
-  const catMap = {};
-  expenses.forEach(e => {
-    if (!e.category) return;
-    catMap[e.category] = (catMap[e.category]||0) + parseFloat(e.amount||0);
-  });
-  const catTotal = Object.values(catMap).reduce((a,b)=>a+b,0);
-  const catRows = Object.entries(catMap)
-    .sort((a,b)=>b[1]-a[1])
-    .map(([cat, val]) => [cat, fmtBRL(val), catTotal > 0 ? (val/catTotal*100).toFixed(1)+'%' : '—']);
-
-  doc.autoTable({
-    startY: y,
-    margin: { left: MARGIN, right: MARGIN },
-    head: [['Categoria', 'Total', '% do Total']],
-    body: catRows,
-    styles: { fontSize: 8, cellPadding: 2.5 },
-    headStyles: { fillColor: BLACK, textColor: 255, fontStyle: 'bold', fontSize: 8 },
-    alternateRowStyles: { fillColor: [250, 248, 245] },
-    columnStyles: { 0:{fontStyle:'bold'}, 1:{halign:'right'}, 2:{halign:'right'} },
-    theme: 'grid',
-  });
-  y = doc.lastAutoTable.finalY + 8;
-
-  // ══════════════════════════════════════════
-  // TOP FORNECEDORES
-  // ══════════════════════════════════════════
-  sectionTitle('4. Top Fornecedores por Volume');
-
-  const supplierMap = {};
-  expenses.forEach(e => {
-    if (!e.supplier_name) return;
-    if (!supplierMap[e.supplier_name]) supplierMap[e.supplier_name] = { total: 0, count: 0, paid: 0 };
-    supplierMap[e.supplier_name].total += parseFloat(e.amount||0);
-    supplierMap[e.supplier_name].count++;
-    if (e.status === 'pago') supplierMap[e.supplier_name].paid += parseFloat(e.amount||0);
-  });
-  const supplierRows = Object.entries(supplierMap)
-    .sort((a,b)=>b[1].total-a[1].total)
-    .slice(0, 15)
-    .map(([name, s]) => [name, s.count.toString(), fmtBRL(s.total), fmtBRL(s.paid), fmtBRL(s.total - s.paid)]);
-
-  doc.autoTable({
-    startY: y,
-    margin: { left: MARGIN, right: MARGIN },
-    head: [['Fornecedor', 'NFs', 'Total', 'Pago', 'Pendente']],
-    body: supplierRows,
-    styles: { fontSize: 8, cellPadding: 2.5 },
-    headStyles: { fillColor: BLACK, textColor: 255, fontStyle: 'bold', fontSize: 8 },
-    alternateRowStyles: { fillColor: [250, 248, 245] },
-    columnStyles: { 0:{fontStyle:'bold'}, 1:{halign:'center'}, 2:{halign:'right'}, 3:{halign:'right'}, 4:{halign:'right'} },
-    theme: 'grid',
-  });
-  y = doc.lastAutoTable.finalY + 8;
-
-  // ══════════════════════════════════════════
-  // CONTAS PENDENTES
-  // ══════════════════════════════════════════
-  sectionTitle('5. Contas Pendentes');
-
-  const pendingExpenses = expenses
-    .filter(e => e.status === 'pendente')
-    .sort((a,b) => (a.due_date||'').localeCompare(b.due_date||''));
-
-  const pendingRows = pendingExpenses.map(e => [
-    fmtDate(e.due_date),
-    e.supplier_name || '—',
-    e.category || '—',
-    e.week_range || '—',
-    fmtBRL(e.amount),
-  ]);
-
-  if (pendingRows.length > 0) {
-    doc.autoTable({
-      startY: y,
-      margin: { left: MARGIN, right: MARGIN },
-      head: [['Vencimento', 'Fornecedor', 'Categoria', 'Semana', 'Valor']],
-      body: pendingRows,
-      styles: { fontSize: 7.5, cellPadding: 2 },
-      headStyles: { fillColor: BLACK, textColor: 255, fontStyle: 'bold', fontSize: 8 },
-      alternateRowStyles: { fillColor: [250, 248, 245] },
-      columnStyles: { 0:{halign:'center'}, 1:{fontStyle:'bold'}, 4:{halign:'right'} },
-      didParseCell: (data) => {
-        if (data.section === 'body' && data.column.index === 0) {
-          const due = pendingExpenses[data.row.index]?.due_date;
-          if (due && due < currentMonth + '-01') {
-            data.cell.styles.textColor = [192, 57, 43];
-            data.cell.styles.fontStyle = 'bold';
-          }
-        }
-      },
-      theme: 'grid',
-    });
-    y = doc.lastAutoTable.finalY + 8;
-  } else {
-    checkPage(12);
-    doc.setFontSize(9);
-    doc.setTextColor(...GRAY);
-    doc.text('Nenhuma conta pendente.', MARGIN, y + 6);
-    y += 12;
-  }
-
-  // ══════════════════════════════════════════
-  // FLUXO DE CAIXA MENSAL
-  // ══════════════════════════════════════════
-  sectionTitle('6. Fluxo de Caixa Acumulado');
-
-  let cumulative = saldoInicial;
-  const fluxoRows = months12.map(m => {
-    const rev = revenue.filter(r=>r.month===m).reduce((a,b)=>a+parseFloat(b.amount||0),0);
-    const exp = expenses.filter(e=>e.due_date?.startsWith(m)&&e.status==='pago').reduce((a,b)=>a+parseFloat(b.amount||0),0);
-    const res = rev - exp;
-    cumulative += res;
-    return [getMonthLabel(m), fmtBRL(rev), fmtBRL(exp), fmtBRL(res), fmtBRL(cumulative)];
-  });
-
-  doc.autoTable({
-    startY: y,
-    margin: { left: MARGIN, right: MARGIN },
-    head: [['Mês', 'Receita', 'Despesas Pagas', 'Resultado', 'Saldo Acumulado']],
-    body: fluxoRows,
-    styles: { fontSize: 8, cellPadding: 2.5 },
-    headStyles: { fillColor: BLACK, textColor: 255, fontStyle: 'bold', fontSize: 8 },
-    alternateRowStyles: { fillColor: [250, 248, 245] },
-    columnStyles: { 0:{fontStyle:'bold'}, 1:{halign:'right'}, 2:{halign:'right'}, 3:{halign:'right'}, 4:{halign:'right', fontStyle:'bold'} },
-    didParseCell: (data) => {
-      if (data.section === 'body' && (data.column.index === 3 || data.column.index === 4)) {
-        const v = parseFloat(data.cell.raw?.replace(/[R$\s.]/g,'').replace(',','.'));
-        if (!isNaN(v) && v < 0) data.cell.styles.textColor = [192, 57, 43];
-        if (!isNaN(v) && v > 0 && data.column.index === 4) data.cell.styles.textColor = [25, 144, 58];
-      }
-    },
-    theme: 'grid',
-  });
-  y = doc.lastAutoTable.finalY + 8;
-
-  // ══════════════════════════════════════════
-  // FOOTER on last page
-  // ══════════════════════════════════════════
-  const totalPages = doc.getNumberOfPages();
-  for (let i = 1; i <= totalPages; i++) {
-    doc.setPage(i);
-    doc.setDrawColor(...LIGHT);
-    doc.setLineWidth(0.3);
-    doc.line(MARGIN, PAGE_H - 10, PAGE_W - MARGIN, PAGE_H - 10);
-    doc.setFontSize(7);
-    doc.setTextColor(...GRAY);
-    doc.text('Vitto & Giulio Pizza — Documento confidencial', MARGIN, PAGE_H - 6);
-    doc.text(`Página ${i} de ${totalPages}`, PAGE_W - MARGIN, PAGE_H - 6, { align: 'right' });
-  }
-
-  const filename = `VG_Relatorio_Executivo_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.pdf`;
-  doc.save(filename);
-}
-
 function Relatorios({ expenses, revenue, expenseItems }) {
   const catChartRef = useRef(null);
   const revExpChartRef = useRef(null);
@@ -5074,18 +4556,8 @@ function Relatorios({ expenses, revenue, expenseItems }) {
 
   return (
     <div className="page">
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header">
         <div className="page-title">Relatórios</div>
-        <button
-          className="btn btn-primary"
-          style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}
-          onClick={() => {
-            const saldoInicial = parseFloat(localStorage.getItem('vg_saldo_inicial') || '0');
-            generateExecutiveReport({ expenses, revenue, saldoInicial });
-          }}
-        >
-          📄 Baixar Relatório PDF
-        </button>
         <div className="page-subtitle">Análise financeira · {new Date().getFullYear()}</div>
       </div>
 
@@ -5985,7 +5457,6 @@ function App() {
   const [receivables, setReceivables] = useState([]);
   const [expenseRequests, setExpenseRequests] = useState([]);
   const [activityLog, setActivityLog] = useState([]);
-  const [dbCategories, setDbCategories] = useState({ expense: [], supplier: [] });
 
   // Keep session in a ref so callbacks always have the latest value
   const sessionRef = useRef(null);
@@ -6088,17 +5559,6 @@ function App() {
       } catch(profErr) {
         console.error('Profile load error:', profErr);
       }
-
-      // categories — non-blocking
-      sb.from('categories').select('*').order('name')
-        .then(({ data }) => {
-          if (data) {
-            const grouped = { expense: [], supplier: [] };
-            data.forEach(c => { if (grouped[c.type]) grouped[c.type].push(c.name); });
-            setDbCategories(grouped);
-          }
-        })
-        .catch(e => console.warn('categories load failed:', e));
 
       // expense_items — non-blocking
       sb.from('expense_items').select('*')
@@ -6279,11 +5739,7 @@ function App() {
     ...(isOwner ? [{ id: 'config', label: 'Configurações', shortLabel: 'Config', icon: '⊙' }] : []),
   ];
 
-  const expenseCategories = dbCategories.expense.length > 0 ? dbCategories.expense : CATEGORIES;
-  const supplierCategories = dbCategories.supplier.length > 0 ? dbCategories.supplier : SUPPLIER_CATEGORIES;
-
   return (
-    <CategoriesContext.Provider value={{ expenseCategories, supplierCategories }}>
     <div className="app">
       {/* SIDEBAR */}
       <div className="sidebar">
@@ -6455,7 +5911,6 @@ function App() {
         </div>
       )}
     </div>
-    </CategoriesContext.Provider>
   );
 }
 
