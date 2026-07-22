@@ -5574,7 +5574,7 @@ function App() {
         .catch(e => console.warn('expense_requests load failed:', e));
 
       // activity_log — non-blocking
-      sb.from('activity_log').select('*, profiles(name)').order('created_at', { ascending: false }).limit(100)
+      sb.from('activity_log').select('*').order('created_at', { ascending: false }).limit(100)
         .then(({ data }) => { if (data) setActivityLog(data); })
         .catch(e => console.warn('activity_log load failed:', e));
 
