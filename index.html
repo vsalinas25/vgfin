@@ -5421,6 +5421,97 @@ function Configuracoes({ user, profile, expenses, suppliers, revenue, forecast, 
 }
 
 
+
+/* ═══════════════════════════════════════════════════════
+   AUTO-GENERATE RECURRING EXPENSES
+═══════════════════════════════════════════════════════ */
+async function generateRecurringExpenses(sess) {
+  try {
+    // Get all recurring expenses
+    const { data: recurring, error } = await sb
+      .from('expenses')
+      .select('*')
+      .eq('recurring', true)
+      .not('frequency', 'is', null);
+
+    if (error || !recurring || recurring.length === 0) return;
+
+    const now = new Date();
+    const currentMonth = monthISO(now);
+    const currentYear = now.getFullYear();
+
+    for (const exp of recurring) {
+      const origDate = new Date(exp.due_date + 'T00:00:00');
+      const origDay = origDate.getDate();
+
+      // Calculate next due dates based on frequency
+      let targetDates = [];
+
+      if (exp.frequency === 'mensal') {
+        // Generate for current month
+        const targetDate = new Date(currentYear, now.getMonth(), origDay);
+        // Handle months with fewer days
+        if (targetDate.getMonth() !== now.getMonth()) {
+          targetDate.setDate(0); // last day of month
+        }
+        targetDates.push(targetDate.toISOString().split('T')[0]);
+      } else if (exp.frequency === 'semanal') {
+        // Generate for current week
+        const monday = getMondayOfWeek(todayISO());
+        for (let i = 0; i < 7; i++) {
+          const d = new Date(monday + 'T00:00:00');
+          d.setDate(d.getDate() + i);
+          if (d.getDay() === origDate.getDay()) {
+            targetDates.push(d.toISOString().split('T')[0]);
+          }
+        }
+      } else if (exp.frequency === 'anual') {
+        const targetDate = new Date(currentYear, origDate.getMonth(), origDay);
+        targetDates.push(targetDate.toISOString().split('T')[0]);
+      }
+
+      for (const targetDue of targetDates) {
+        // Skip if target is before original
+        if (targetDue <= exp.due_date) continue;
+        // Skip if target is more than 45 days in future
+        const daysAhead = Math.round((new Date(targetDue) - now) / 86400000);
+        if (daysAhead > 45) continue;
+
+        // Check if already exists for this period
+        const { data: existing } = await sb
+          .from('expenses')
+          .select('id')
+          .eq('supplier_name', exp.supplier_name)
+          .eq('due_date', targetDue)
+          .eq('amount', exp.amount);
+
+        if (existing && existing.length > 0) continue;
+
+        // Create the recurring instance
+        const newExp = {
+          supplier_name: exp.supplier_name,
+          supplier_id: exp.supplier_id,
+          category: exp.category,
+          expense_type: exp.expense_type,
+          amount: exp.amount,
+          due_date: targetDue,
+          payment_method: exp.payment_method,
+          notes: exp.notes ? exp.notes + ' (recorrente)' : '(recorrente)',
+          status: 'pendente',
+          recurring: true,
+          frequency: exp.frequency,
+          week_range: fmtWeekRange(getMondayOfWeek(targetDue)),
+          created_by: sess.user.id,
+        };
+
+        await sb.from('expenses').insert(newExp);
+      }
+    }
+  } catch (e) {
+    console.warn('generateRecurringExpenses error:', e);
+  }
+}
+
 /* ═══════════════════════════════════════════════════════
    ACTIVITY LOG HELPER
 ═══════════════════════════════════════════════════════ */
@@ -5578,6 +5669,9 @@ function App() {
       sb.from('activity_log').select('*').order('created_at', { ascending: false }).limit(100)
         .then(({ data }) => { if (data) setActivityLog(data); })
         .catch(e => console.warn('activity_log load failed:', e));
+
+      // Auto-generate recurring expenses for current month
+      generateRecurringExpenses(sess);
 
       setLastSync(new Date());
     } catch (err) {
