@@ -1970,6 +1970,7 @@ function PagarModal({ expense, onConfirm, onClose }) {
 ═══════════════════════════════════════════════════════ */
 function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isOwner }) {
   const [filter, setFilter] = useState({ status: 'todos', category: '', search: '', from: '', to: '', week: '' });
+  const [faturaModal, setFaturaModal] = useState(false);
   const [itemsModal, setItemsModal] = useState(null);
   const [codigoModal, setCodigoModal] = useState(null);
   const [pagarModal, setPagarModal] = useState(null);
@@ -2115,7 +2116,10 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
           <div className="page-title">Contas a Pagar</div>
           {overdueCount > 0 && <div className="page-subtitle" style={{ color: 'var(--danger)', fontWeight: 600 }}>⚠ {overdueCount} vencida{overdueCount > 1 ? 's' : ''}</div>}
         </div>
-        <button className="btn btn-primary" onClick={() => setModal({ type: 'new' })}>+ Nova Despesa</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-outline" onClick={() => setFaturaModal(true)}>💳 Importar Fatura</button>
+          <button className="btn btn-primary" onClick={() => setModal({ type: 'new' })}>+ Nova Despesa</button>
+        </div>
       </div>
 
       <div className="weekly-summary">
@@ -2226,6 +2230,13 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
           msg={`Deseja excluir a despesa de ${fmtBRL(confirm.amount)} para ${confirm.supplier_name}? Esta ação não pode ser desfeita.`}
           onConfirm={() => handleDelete(confirm.id)}
           onCancel={() => setConfirm(null)}
+        />
+      )}
+
+      {faturaModal && (
+        <FaturaImporter
+          onImport={onRefresh}
+          onClose={() => setFaturaModal(false)}
         />
       )}
 
@@ -3261,6 +3272,255 @@ function ReviewModal({ req, onApprove, onReject, onClose }) {
    MODULE — RECEITAS
 ═══════════════════════════════════════════════════════ */
 
+
+/* ═══════════════════════════════════════════════════════
+   FATURA IMPORTER — Importar fatura de cartão de crédito
+═══════════════════════════════════════════════════════ */
+function FaturaImporter({ onImport, onClose }) {
+  const [stage, setStage] = useState('upload');
+  const [dragging, setDragging] = useState(false);
+  const [rows, setRows] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [cartaoNome, setCartaoNome] = useState('');
+  const fileRef = useRef(null);
+
+  async function processFile(file) {
+    setStage('processing');
+    try {
+      const base64 = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result.split(',')[1]);
+        r.onerror = () => rej(new Error('Falha ao ler arquivo'));
+        r.readAsDataURL(file);
+      });
+
+      const isPdf = file.type === 'application/pdf';
+      const mediaType = isPdf ? 'application/pdf' : file.type;
+
+      const messages = [{
+        role: 'user',
+        content: [
+          {
+            type: isPdf ? 'document' : 'image',
+            source: { type: 'base64', media_type: mediaType, data: base64 }
+          },
+          {
+            type: 'text',
+            text: `Você está analisando uma fatura de cartão de crédito empresarial brasileiro.
+
+Extraia TODAS as transações de compra/despesa visíveis. Para cada transação retorne:
+- date: data da COMPRA no formato YYYY-MM-DD (não a data de vencimento da fatura)
+- description: nome do estabelecimento/fornecedor exatamente como aparece
+- amount: valor em reais da PARCELA (número positivo, ponto decimal, sem R$)
+- category: classifique em UMA dessas categorias exatas: "Compras", "Gastos Fixos", "Gastos Variáveis", "Gastos Gerais", "Impostos", "Salários"
+- installment: parcela atual e total se houver (ex: "3/12"), ou "Única" se não for parcelado
+
+NÃO inclua: estornos ou valores negativos (créditos na fatura).
+
+Retorne APENAS um array JSON válido, sem texto adicional, sem markdown.
+Exemplo: [{"date":"2026-06-05","description":"FACEBK ADS","amount":351.11,"category":"Gastos Variáveis","installment":"Única"}]
+
+Se não encontrar transações, retorne: []`
+          }
+        ]
+      }];
+
+      const res = await fetch('https://dawn-cell-9729.vittoegiulio.workers.dev', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 4000, messages }),
+      });
+
+      const data = await res.json();
+      const text = data.content?.[0]?.text || '[]';
+      const clean = text.replace(/```json|```/g, '').trim();
+      const parsed = JSON.parse(clean);
+
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        toast('Nenhuma transação encontrada na fatura.', 'error');
+        setStage('upload');
+        return;
+      }
+
+      setRows(parsed.map((r, i) => ({ ...r, _id: i, _selected: true })));
+      setStage('preview');
+    } catch (err) {
+      toast('Erro ao processar: ' + err.message, 'error');
+      setStage('upload');
+    }
+  }
+
+  function handleDrop(e) {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) processFile(file);
+  }
+
+  function toggleRow(id) { setRows(prev => prev.map(r => r._id === id ? { ...r, _selected: !r._selected } : r)); }
+  function updateRow(id, field, value) { setRows(prev => prev.map(r => r._id === id ? { ...r, [field]: value } : r)); }
+  function removeRow(id) { setRows(prev => prev.filter(r => r._id !== id)); }
+
+  async function handleSave() {
+    const selected = rows.filter(r => r._selected);
+    if (selected.length === 0) { toast('Selecione ao menos uma transação.', 'error'); return; }
+    setSaving(true);
+    try {
+      const user = (await sb.auth.getUser()).data.user;
+      const toInsert = selected.map(r => ({
+        due_date: r.date,
+        supplier_name: r.description,
+        amount: parseFloat(r.amount),
+        category: r.category || 'Gastos Variáveis',
+        status: 'pago',
+        payment_method: 'Cartão ' + (cartaoNome || 'Crédito'),
+        notes: r.installment && r.installment !== 'Única' ? 'Parcela ' + r.installment : '',
+        week_range: fmtWeekRange(getMondayOfWeek(r.date)),
+        paid_date: r.date,
+        created_by: user.id,
+      }));
+      const { error } = await sb.from('expenses').insert(toInsert);
+      if (error) { toast('Erro ao salvar: ' + error.message, 'error'); setSaving(false); return; }
+      toast(selected.length + ' transação(ões) importada(s) com sucesso!', 'success');
+      onImport();
+      onClose();
+    } catch (err) {
+      toast('Erro: ' + err.message, 'error');
+    }
+    setSaving(false);
+  }
+
+  const selectedCount = rows.filter(r => r._selected).length;
+  const selectedTotal = rows.filter(r => r._selected).reduce((a, r) => a + parseFloat(r.amount || 0), 0);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{ maxWidth: stage === 'preview' ? 860 : 460, width: '96vw' }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">
+            {stage === 'upload' && '💳 Importar Fatura de Cartão'}
+            {stage === 'processing' && 'Processando fatura...'}
+            {stage === 'preview' && 'Transações Extraídas — Revisão'}
+          </div>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+
+        <div style={{ padding: '20px 24px 24px' }}>
+          {stage === 'upload' && (
+            <>
+              <div style={{ marginBottom: 14 }}>
+                <label className="form-label">Nome do Cartão (opcional)</label>
+                <input className="form-control" placeholder="Ex: C6 Business 9517"
+                  value={cartaoNome} onChange={e => setCartaoNome(e.target.value)} />
+              </div>
+              <div
+                className={`nf-dropzone${dragging ? ' drag-over' : ''}`}
+                style={{ marginBottom: 12 }}
+                onDragOver={e => { e.preventDefault(); setDragging(true); }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={handleDrop}
+                onClick={() => fileRef.current.click()}
+              >
+                <div style={{ fontSize: 32, marginBottom: 8 }}>💳</div>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>Fatura do Cartão</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>PDF, PNG, JPG ou WEBP · Arraste ou clique</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                  O sistema extrai cada compra individualmente com a data real
+                </div>
+              </div>
+              <input ref={fileRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }}
+                onChange={e => e.target.files[0] && processFile(e.target.files[0])} />
+              <div style={{ background: '#f5f2ed', borderRadius: 4, padding: '10px 12px', fontSize: 11, color: 'var(--muted)' }}>
+                <strong>Regime de competência:</strong> cada compra é lançada na data real da compra, não na data do pagamento da fatura. Estornos e créditos são ignorados automaticamente.
+              </div>
+            </>
+          )}
+
+          {stage === 'processing' && (
+            <div style={{ textAlign: 'center', padding: '40px 0' }}>
+              <div style={{ fontSize: 32, marginBottom: 16 }}>⏳</div>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>Analisando fatura...</div>
+              <div style={{ fontSize: 13, color: 'var(--muted)' }}>O Claude está lendo cada transação individualmente</div>
+            </div>
+          )}
+
+          {stage === 'preview' && (
+            <>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
+                Revise as transações. Desmarque encargos pessoais ou itens incorretos.
+              </div>
+              <div style={{ overflowX: 'auto', marginBottom: 12 }}>
+                <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid var(--border)', background: '#f5f2ed' }}>
+                      <th style={{ padding: '6px', textAlign: 'left', width: 28 }}></th>
+                      <th style={{ padding: '6px', textAlign: 'left', width: 90 }}>Data</th>
+                      <th style={{ padding: '6px', textAlign: 'left' }}>Descrição</th>
+                      <th style={{ padding: '6px', textAlign: 'left', width: 130 }}>Categoria</th>
+                      <th style={{ padding: '6px', textAlign: 'center', width: 60 }}>Parcela</th>
+                      <th style={{ padding: '6px', textAlign: 'right', width: 90 }}>Valor</th>
+                      <th style={{ padding: '6px', width: 24 }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map(r => (
+                      <tr key={r._id} style={{ borderBottom: '1px solid var(--border)', opacity: r._selected ? 1 : 0.35 }}>
+                        <td style={{ padding: '3px 6px' }}>
+                          <input type="checkbox" checked={r._selected} onChange={() => toggleRow(r._id)} />
+                        </td>
+                        <td style={{ padding: '3px 4px' }}>
+                          <input type="date" value={r.date} onChange={e => updateRow(r._id, 'date', e.target.value)}
+                            style={{ border: 'none', background: 'transparent', fontSize: 11, width: 110 }} />
+                        </td>
+                        <td style={{ padding: '3px 4px' }}>
+                          <input type="text" value={r.description} onChange={e => updateRow(r._id, 'description', e.target.value)}
+                            style={{ border: 'none', background: 'transparent', fontSize: 11, width: '100%', minWidth: 160 }} />
+                        </td>
+                        <td style={{ padding: '3px 4px' }}>
+                          <select value={CATEGORIES.includes(r.category) ? r.category : CATEGORIES[0]}
+                            onChange={e => updateRow(r._id, 'category', e.target.value)}
+                            style={{ border: 'none', background: 'transparent', fontSize: 11 }}>
+                            {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+                          </select>
+                        </td>
+                        <td style={{ padding: '3px 4px', textAlign: 'center', fontSize: 10, color: 'var(--muted)' }}>
+                          {r.installment || '—'}
+                        </td>
+                        <td style={{ padding: '3px 4px', textAlign: 'right' }}>
+                          <input type="number" value={r.amount} onChange={e => updateRow(r._id, 'amount', e.target.value)}
+                            style={{ border: 'none', background: 'transparent', fontSize: 11, textAlign: 'right', width: 80,
+                              color: 'var(--danger)', fontFamily: 'var(--font-mono)', fontWeight: 600 }} />
+                        </td>
+                        <td style={{ padding: '3px 4px' }}>
+                          <button onClick={() => removeRow(r._id)}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 12 }}>✕</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                background: '#f5f2ed', borderRadius: 4, padding: '10px 14px', marginBottom: 14 }}>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>{selectedCount} transação(ões) · Status: <strong>Pago</strong></span>
+                <span style={{ fontWeight: 700, color: 'var(--danger)', fontFamily: 'var(--font-mono)', fontSize: 15 }}>
+                  {fmtBRL(selectedTotal)}
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>Cancelar</button>
+                <button className="btn btn-primary" style={{ flex: 2 }} onClick={handleSave} disabled={saving || selectedCount === 0}>
+                  {saving ? 'Salvando...' : `Importar ${selectedCount} transação(ões) — ${fmtBRL(selectedTotal)}`}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════
    EXTRATO IMPORTER — Importar extrato bancário Itaú
 ═══════════════════════════════════════════════════════ */
@@ -3558,8 +3818,8 @@ function Receitas({ revenue, setRevenue, onRefresh, session }) {
           <div className="page-title">Receitas</div>
           <div className="page-subtitle">Registro de receitas operacionais e não operacionais</div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-outline" onClick={() => setExtratoModal(true)}>📎 Importar Extrato</button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn btn-outline" onClick={() => setExtratoModal(true)}>🏦 Importar Extrato</button>
           <button className="btn btn-primary" onClick={() => setModal({ mode: 'new' })}>+ Nova Receita</button>
         </div>
       </div>
@@ -3656,6 +3916,8 @@ function Receitas({ revenue, setRevenue, onRefresh, session }) {
           onClose={() => setExtratoModal(false)}
         />
       )}
+
+
 
       {/* Modal */}
       {modal && (
