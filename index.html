@@ -5791,42 +5791,47 @@ function Configuracoes({ user, profile, expenses, suppliers, revenue, forecast, 
 ═══════════════════════════════════════════════════════ */
 async function generateRecurringExpenses(sess) {
   try {
-    // Get all recurring expenses
     const { data: recurring, error } = await sb
       .from('expenses')
       .select('*')
       .eq('recurring', true)
       .not('frequency', 'is', null);
 
-    if (error || !recurring || recurring.length === 0) return;
+    if (error || !recurring || recurring.length === 0) return false;
 
     const now = new Date();
-    const currentMonth = monthISO(now);
     const currentYear = now.getFullYear();
+    let inserted = 0;
+
+    // Generate for current month AND next month
+    const monthsToGenerate = [now.getMonth(), now.getMonth() + 1];
 
     for (const exp of recurring) {
       const origDate = new Date(exp.due_date + 'T00:00:00');
       const origDay = origDate.getDate();
-
-      // Calculate next due dates based on frequency
       let targetDates = [];
 
       if (exp.frequency === 'mensal') {
-        // Generate for current month
-        const targetDate = new Date(currentYear, now.getMonth(), origDay);
-        // Handle months with fewer days
-        if (targetDate.getMonth() !== now.getMonth()) {
-          targetDate.setDate(0); // last day of month
+        for (const month of monthsToGenerate) {
+          const targetDate = new Date(currentYear, month, origDay);
+          // Handle overflow (e.g. day 31 in a 30-day month)
+          if (targetDate.getMonth() !== ((month + 12) % 12)) {
+            targetDate.setDate(0);
+          }
+          targetDates.push(targetDate.toISOString().split('T')[0]);
         }
-        targetDates.push(targetDate.toISOString().split('T')[0]);
       } else if (exp.frequency === 'semanal') {
-        // Generate for current week
-        const monday = getMondayOfWeek(todayISO());
-        for (let i = 0; i < 7; i++) {
-          const d = new Date(monday + 'T00:00:00');
-          d.setDate(d.getDate() + i);
-          if (d.getDay() === origDate.getDay()) {
-            targetDates.push(d.toISOString().split('T')[0]);
+        // Current week + next 3 weeks
+        for (let w = 0; w < 4; w++) {
+          const monday = getMondayOfWeek(todayISO());
+          const base = new Date(monday + 'T00:00:00');
+          base.setDate(base.getDate() + w * 7);
+          for (let i = 0; i < 7; i++) {
+            const d = new Date(base);
+            d.setDate(d.getDate() + i);
+            if (d.getDay() === origDate.getDay()) {
+              targetDates.push(d.toISOString().split('T')[0]);
+            }
           }
         }
       } else if (exp.frequency === 'anual') {
@@ -5835,13 +5840,10 @@ async function generateRecurringExpenses(sess) {
       }
 
       for (const targetDue of targetDates) {
-        // Skip if target is before original
+        // Skip if same as or before the original
         if (targetDue <= exp.due_date) continue;
-        // Skip if target is more than 45 days in future
-        const daysAhead = Math.round((new Date(targetDue) - now) / 86400000);
-        if (daysAhead > 45) continue;
 
-        // Check if already exists for this period
+        // Check duplicate
         const { data: existing } = await sb
           .from('expenses')
           .select('id')
@@ -5851,7 +5853,6 @@ async function generateRecurringExpenses(sess) {
 
         if (existing && existing.length > 0) continue;
 
-        // Create the recurring instance
         const newExp = {
           supplier_name: exp.supplier_name,
           supplier_id: exp.supplier_id,
@@ -5860,7 +5861,7 @@ async function generateRecurringExpenses(sess) {
           amount: exp.amount,
           due_date: targetDue,
           payment_method: exp.payment_method,
-          notes: exp.notes ? exp.notes + ' (recorrente)' : '(recorrente)',
+          notes: null,
           status: 'pendente',
           recurring: true,
           frequency: exp.frequency,
@@ -5868,11 +5869,15 @@ async function generateRecurringExpenses(sess) {
           created_by: sess.user.id,
         };
 
-        await sb.from('expenses').insert(newExp);
+        const { error: insErr } = await sb.from('expenses').insert(newExp);
+        if (!insErr) inserted++;
       }
     }
+
+    return inserted > 0; // true = something new was created, caller should reload
   } catch (e) {
     console.warn('generateRecurringExpenses error:', e);
+    return false;
   }
 }
 
@@ -6034,8 +6039,14 @@ function App() {
         .then(({ data }) => { if (data) setActivityLog(data); })
         .catch(e => console.warn('activity_log load failed:', e));
 
-      // Auto-generate recurring expenses for current month
-      generateRecurringExpenses(sess);
+      // Auto-generate recurring expenses — reload if new ones were created
+      generateRecurringExpenses(sess).then(hadNew => {
+        if (hadNew) {
+          sb.from('expenses').select('*').order('due_date').then(({ data }) => {
+            if (data) setExpenses(data);
+          });
+        }
+      });
 
       setLastSync(new Date());
     } catch (err) {
