@@ -1969,6 +1969,11 @@ function PagarModal({ expense, onConfirm, onClose }) {
    MODULE 2 — CONTAS A PAGAR
 ═══════════════════════════════════════════════════════ */
 function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isOwner }) {
+  const [viewMode, setViewMode] = useState('semana'); // semana | mes
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [selectedMonth, setSelectedMonth] = useState(monthISO(new Date()));
+  const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
   const [filter, setFilter] = useState({ status: 'todos', category: '', search: '', from: '', to: '', week: '' });
   const [faturaModal, setFaturaModal] = useState(false);
   const [itemsModal, setItemsModal] = useState(null);
@@ -1998,30 +2003,64 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
     } catch {}
   }, [modal]);
 
-  const filtered = useMemo(() => {
+  // Week navigation
+  const currentWeekMonday = useMemo(() => {
+    const base = getMondayOfWeek(todayISO());
+    const d = new Date(base + 'T00:00:00');
+    d.setDate(d.getDate() + weekOffset * 7);
+    return d.toISOString().split('T')[0];
+  }, [weekOffset]);
+
+  const currentWeekSunday = useMemo(() => getSundayOfWeek(currentWeekMonday), [currentWeekMonday]);
+
+  // Filter by search + category
+  const baseFiltered = useMemo(() => {
     return expenses.filter(e => {
-      if (filter.status !== 'todos' && e.status !== filter.status) return false;
-      if (filter.category && e.category !== filter.category) return false;
-      if (filter.search && !e.supplier_name.toLowerCase().includes(filter.search.toLowerCase())) return false;
-      if (filter.from && e.due_date < filter.from) return false;
-      if (filter.to && e.due_date > filter.to) return false;
-      if (filter.week && e.week_range !== filter.week) return false;
+      if (search && !e.supplier_name.toLowerCase().includes(search.toLowerCase())) return false;
+      if (categoryFilter && e.category !== categoryFilter) return false;
       return true;
-    }).sort((a, b) => {
-      const aOv = isOverdue(a.due_date, a.status);
-      const bOv = isOverdue(b.due_date, b.status);
-      if (aOv && !bOv) return -1;
-      if (!aOv && bOv) return 1;
-      return a.due_date.localeCompare(b.due_date);
     });
-  }, [expenses, filter]);
+  }, [expenses, search, categoryFilter]);
+
+  // Sectioned view for week/month mode
+  const sections = useMemo(() => {
+    const overdue = [];
+    const pending = [];
+    const paid = [];
+
+    baseFiltered.forEach(e => {
+      if (viewMode === 'semana') {
+        // Show: overdue (all), this week pending, this week paid
+        const inWeek = e.due_date >= currentWeekMonday && e.due_date <= currentWeekSunday;
+        const ov = isOverdue(e.due_date, e.status);
+        if (ov) { overdue.push(e); return; }
+        if (inWeek && e.status === 'pendente') { pending.push(e); return; }
+        if (inWeek && e.status === 'pago') { paid.push(e); return; }
+      } else {
+        // Month mode
+        const inMonth = e.due_date.startsWith(selectedMonth);
+        if (!inMonth) return;
+        const ov = isOverdue(e.due_date, e.status);
+        if (ov) { overdue.push(e); return; }
+        if (e.status === 'pendente') { pending.push(e); return; }
+        if (e.status === 'pago') { paid.push(e); return; }
+      }
+    });
+
+    overdue.sort((a,b) => a.due_date.localeCompare(b.due_date));
+    pending.sort((a,b) => a.due_date.localeCompare(b.due_date));
+    paid.sort((a,b) => b.paid_date?.localeCompare(a.paid_date || '') || 0);
+    return { overdue, pending, paid };
+  }, [baseFiltered, viewMode, currentWeekMonday, currentWeekSunday, selectedMonth]);
+
+  // Compat: filtered for legacy code
+  const filtered = useMemo(() => [...sections.overdue, ...sections.pending, ...sections.paid], [sections]);
 
   const overdueCount = expenses.filter(e => isOverdue(e.due_date, e.status)).length;
-
-  // Weekly summary
-  const weekRevenue = revenue.reduce((a,b) => a + b.amount, 0);
-  const weekExp = filtered.reduce((a,b) => a + b.amount, 0);
-  const weekDiff = weekRevenue - weekExp;
+  const weekExp = filtered.reduce((a,b) => a + (parseFloat(b.amount)||0), 0);
+  const totalPendente = expenses.filter(e=>e.status==='pendente').reduce((a,b)=>a+(parseFloat(b.amount)||0),0);
+  const totalPagoMes = expenses.filter(e=>e.status==='pago'&&e.paid_date?.startsWith(monthISO(new Date()))).reduce((a,b)=>a+(parseFloat(b.amount)||0),0);
+  const [paidExpanded, setPaidExpanded] = useState(false);
 
   async function handleSave(payload, nfItems) {
     const user = (await sb.auth.getUser()).data.user;
@@ -2109,111 +2148,174 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
     onRefresh();
   }
 
+  // Row renderer — shared between sections
+  function ExpenseRow({ e, dimmed }) {
+    const ov = isOverdue(e.due_date, e.status);
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '11px 14px',
+        background: ov ? 'var(--bg-danger, #fff8f8)' : 'var(--surface-2, #fff)',
+        border: '0.5px solid var(--border)',
+        borderLeft: ov ? '3px solid var(--danger)' : e.status === 'pendente' ? '3px solid var(--warning, #f59e0b)' : '3px solid transparent',
+        borderRadius: 'var(--radius)',
+        marginBottom: 6,
+        opacity: dimmed ? 0.55 : 1,
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--black)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {e.supplier_name}
+            </span>
+            {e.recurring && <span style={{ fontSize: 10, color: 'var(--muted)' }}>🔁</span>}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <span>{e.category}{e.expense_type ? ' · ' + e.expense_type : ''}</span>
+            {e.payment_method && <span>{e.payment_method}</span>}
+            {ov && e.status === 'pendente' && <span style={{ color: 'var(--danger)', fontWeight: 600 }}>venceu {fmtDate(e.due_date)}</span>}
+            {!ov && e.status === 'pendente' && <span>vence {fmtDate(e.due_date)}</span>}
+            {e.status === 'pago' && e.paid_date && <span style={{ color: 'var(--success)' }}>pago em {fmtDate(e.paid_date)}</span>}
+          </div>
+        </div>
+        <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 13, color: ov ? 'var(--danger)' : 'var(--black)', whiteSpace: 'nowrap' }}>
+          {fmtBRL(e.amount)}
+        </div>
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
+          {e.status === 'pendente' ? (
+            <button className="btn btn-primary btn-sm" onClick={() => setPagarModal(e)}>✓ Pagar</button>
+          ) : (
+            <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={() => markPending(e)}>↩</button>
+          )}
+          {e.notes && <button className="btn btn-ghost btn-sm" onClick={() => setCodigoModal(e)} title="Código">💳</button>}
+          <button className="btn btn-ghost btn-sm" onClick={() => setItemsModal(e)} title="Itens NF">📄</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => setModal({ type: 'edit', expense: e })}>✎</button>
+          {isOwner && <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => setConfirm(e)}>✕</button>}
+        </div>
+      </div>
+    );
+  }
+
+  const now = new Date();
+  const months12 = Array.from({length:12},(_,i) => {
+    const d = new Date(now.getFullYear(), now.getMonth()-11+i, 1);
+    return monthISO(d);
+  });
+
   return (
     <div className="page">
-      <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
-          <div className="page-title">Contas a Pagar</div>
-          {overdueCount > 0 && <div className="page-subtitle" style={{ color: 'var(--danger)', fontWeight: 600 }}>⚠ {overdueCount} vencida{overdueCount > 1 ? 's' : ''}</div>}
-        </div>
+      {/* Header */}
+      <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <div className="page-title">Contas a Pagar</div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-outline" onClick={() => setFaturaModal(true)}>💳 Importar Fatura</button>
           <button className="btn btn-primary" onClick={() => setModal({ type: 'new' })}>+ Nova Despesa</button>
         </div>
       </div>
 
-      <div className="weekly-summary">
-        <div>
-          <div className="weekly-stat-label">Gastos Filtrados</div>
-          <div className="weekly-stat-value">{fmtBRL(weekExp)}</div>
+      {/* Summary cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 16 }}>
+        <div className="metric-card">
+          <div className="metric-label">Vencidas</div>
+          <div className="metric-value" style={{ fontSize: 18, color: overdueCount > 0 ? 'var(--danger)' : 'var(--success)' }}>
+            {fmtBRL(sections.overdue.reduce((a,b)=>a+(parseFloat(b.amount)||0),0))}
+          </div>
+          <div className="metric-sub">{sections.overdue.length} conta{sections.overdue.length !== 1 ? 's' : ''}</div>
         </div>
-        <div>
-          <div className="weekly-stat-label">Total Pendente</div>
-          <div className="weekly-stat-value">{fmtBRL(expenses.filter(e=>e.status==='pendente').reduce((a,b)=>a+b.amount,0))}</div>
+        <div className="metric-card">
+          <div className="metric-label">A Pagar</div>
+          <div className="metric-value" style={{ fontSize: 18 }}>{fmtBRL(totalPendente)}</div>
+          <div className="metric-sub">{expenses.filter(e=>e.status==='pendente').length} pendentes</div>
         </div>
-        <div>
-          <div className="weekly-stat-label">Total Pago (mês)</div>
-          <div className="weekly-stat-value pos">{fmtBRL(expenses.filter(e=>e.status==='pago'&&e.due_date.startsWith(monthISO())).reduce((a,b)=>a+b.amount,0))}</div>
+        <div className="metric-card">
+          <div className="metric-label">Pago ({getMonthLabel(monthISO(new Date()))})</div>
+          <div className="metric-value pos" style={{ fontSize: 18 }}>{fmtBRL(totalPagoMes)}</div>
+          <div className="metric-sub">{expenses.filter(e=>e.status==='pago'&&e.paid_date?.startsWith(monthISO(new Date()))).length} pagamentos</div>
         </div>
       </div>
 
-      <div className="filters-bar">
-        <input className="form-control" placeholder="Buscar fornecedor..." value={filter.search} onChange={e => setFilter(p=>({...p,search:e.target.value}))} style={{ minWidth: 200 }} />
-        <select className="form-control" value={filter.status} onChange={e => setFilter(p=>({...p,status:e.target.value}))}>
-          <option value="todos">Todos</option>
-          <option value="pendente">Pendente</option>
-          <option value="pago">Pago</option>
-        </select>
-        <select className="form-control" value={filter.category} onChange={e => setFilter(p=>({...p,category:e.target.value}))}>
+      {/* View mode tabs + navigation */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
+          <button
+            onClick={() => setViewMode('semana')}
+            style={{ padding: '7px 16px', fontSize: 13, fontWeight: 500, background: viewMode === 'semana' ? 'var(--black)' : 'transparent', color: viewMode === 'semana' ? '#fff' : 'var(--muted)', border: 'none', cursor: 'pointer' }}>
+            Semana
+          </button>
+          <button
+            onClick={() => setViewMode('mes')}
+            style={{ padding: '7px 16px', fontSize: 13, fontWeight: 500, background: viewMode === 'mes' ? 'var(--black)' : 'transparent', color: viewMode === 'mes' ? '#fff' : 'var(--muted)', border: 'none', cursor: 'pointer', borderLeft: '0.5px solid var(--border)' }}>
+            Mês
+          </button>
+        </div>
+
+        {viewMode === 'semana' ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setWeekOffset(p => p - 1)}>←</button>
+            <div style={{ flex: 1, textAlign: 'center', fontSize: 13, fontWeight: 600 }}>
+              {fmtWeekRange(currentWeekMonday)}
+              {weekOffset === 0 && <span style={{ fontSize: 10, color: 'var(--muted)', marginLeft: 6 }}>semana atual</span>}
+            </div>
+            <button className="btn btn-ghost btn-sm" onClick={() => setWeekOffset(p => p + 1)}>→</button>
+            {weekOffset !== 0 && <button className="btn btn-ghost btn-sm" onClick={() => setWeekOffset(0)} style={{ fontSize: 11 }}>hoje</button>}
+          </div>
+        ) : (
+          <select className="form-control" style={{ width: 180 }} value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}>
+            {months12.map(m => <option key={m} value={m}>{getFullMonthLabel(m)}</option>)}
+          </select>
+        )}
+
+        {/* Search + category */}
+        <input className="form-control" placeholder="Buscar..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: 160 }} />
+        <select className="form-control" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} style={{ width: 150 }}>
           <option value="">Todas categorias</option>
           {CATEGORIES.map(c => <option key={c}>{c}</option>)}
         </select>
-        <input className="form-control" type="date" value={filter.from} onChange={e => setFilter(p=>({...p,from:e.target.value}))} placeholder="De" />
-        <input className="form-control" type="date" value={filter.to} onChange={e => setFilter(p=>({...p,to:e.target.value}))} placeholder="Até" />
-        <select className="form-control" value={filter.week} onChange={e => setFilter(p=>({...p,week:e.target.value}))}>
-          <option value="">Todas as semanas</option>
-          {getWeekOptions(todayISO()).map(monday => (
-            <option key={monday} value={fmtWeekRange(monday)}>{fmtWeekRange(monday)}</option>
-          ))}
-        </select>
-        <button className="btn btn-ghost btn-sm" onClick={() => setFilter({ status:'todos',category:'',search:'',from:'',to:'',week:'' })}>Limpar</button>
+        {(search || categoryFilter) && <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setCategoryFilter(''); }}>✕</button>}
       </div>
 
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Fornecedor</th>
-              <th>Categoria</th>
-              <th>Tipo</th>
-              <th>Valor</th>
-              <th>Vencimento</th>
-              <th>Forma Pgto</th>
-              <th>Status</th>
-              <th>Ações</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 ? (
-              <tr><td colSpan={8} style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Nenhuma despesa encontrada.</td></tr>
-            ) : filtered.map(e => {
-              const ov = isOverdue(e.due_date, e.status);
-              const td = isToday(e.due_date) && e.status !== 'pago';
-              return (
-                <tr key={e.id} className={ov ? 'overdue' : td ? 'today' : e.status === 'pago' ? 'paid' : ''}>
-                  <td><strong>{e.supplier_name}</strong></td>
-                  <td><span style={{ fontSize: 11, color: 'var(--muted)' }}>{e.category}</span></td>
-                  <td style={{ fontSize: 12, color: 'var(--muted)' }}>{e.expense_type || '—'}</td>
-                  <td className="mono amount-cell" style={{ fontWeight: 600 }}>{fmtBRL(e.amount)}</td>
-                  <td style={{ fontSize: 12, color: ov ? 'var(--danger)' : 'inherit' }}>{fmtDate(e.due_date)}</td>
-                  <td style={{ fontSize: 12 }}>
-                    <div>{e.payment_method || '—'}</div>
+      {/* Vencidas */}
+      {sections.overdue.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--danger)', marginBottom: 8 }}>
+            ⚠ Vencidas — {sections.overdue.length} conta{sections.overdue.length !== 1 ? 's' : ''} · {fmtBRL(sections.overdue.reduce((a,b)=>a+(parseFloat(b.amount)||0),0))}
+          </div>
+          {sections.overdue.map(e => <ExpenseRow key={e.id} e={e} />)}
+        </div>
+      )}
 
-                  </td>
-                  <td>
-                    {ov && e.status === 'pendente' ? <span className="badge badge-overdue">Vencido</span>
-                      : e.status === 'pago' ? <span className="badge badge-paid">Pago</span>
-                      : <span className="badge badge-pending">Pendente</span>}
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                      {e.status === 'pendente' ? (
-                        <button className="btn btn-primary btn-sm" onClick={() => setPagarModal(e)}>✓ Pagar</button>
-                      ) : (
-                        <button className="btn btn-ghost btn-sm" onClick={() => markPending(e)}>↩ Reabrir</button>
-                      )}
-                      {e.notes && <button className="btn btn-ghost btn-sm" title="Ver código de barras / PIX" onClick={() => setCodigoModal(e)}>💳</button>}
-                      <button className="btn btn-ghost btn-sm" title="Ver itens da NF" onClick={() => setItemsModal(e)}>📄</button>
-                      <button className="btn btn-ghost btn-sm" onClick={() => setModal({ type: 'edit', expense: e })}>✎</button>
-                      {isOwner && <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => setConfirm(e)}>✕</button>}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      {/* Pendentes */}
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 8 }}>
+          {viewMode === 'semana' ? `Esta semana — ${sections.pending.length} pendente${sections.pending.length !== 1 ? 's' : ''}` : `Pendentes — ${sections.pending.length}`}
+          {sections.pending.length > 0 && <span style={{ marginLeft: 6, fontWeight: 400 }}>· {fmtBRL(sections.pending.reduce((a,b)=>a+(parseFloat(b.amount)||0),0))}</span>}
+        </div>
+        {sections.pending.length === 0 ? (
+          <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
+            {viewMode === 'semana' ? 'Nenhuma conta pendente nesta semana. ✓' : 'Nenhuma conta pendente neste mês.'}
+          </div>
+        ) : sections.pending.map(e => <ExpenseRow key={e.id} e={e} />)}
       </div>
+
+      {/* Pagas */}
+      {sections.paid.length > 0 && (
+        <div>
+          <div
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', padding: '6px 0', borderTop: '0.5px solid var(--border)', marginBottom: 8 }}
+            onClick={() => setPaidExpanded(p => !p)}
+          >
+            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--muted)' }}>
+              Pagas — {sections.paid.length} · {fmtBRL(sections.paid.reduce((a,b)=>a+(parseFloat(b.amount)||0),0))}
+            </div>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>{paidExpanded ? '▲ ocultar' : '▼ ver todas'}</span>
+          </div>
+          {(paidExpanded ? sections.paid : sections.paid.slice(0, 3)).map(e => <ExpenseRow key={e.id} e={e} dimmed />)}
+          {!paidExpanded && sections.paid.length > 3 && (
+            <div style={{ textAlign: 'center', padding: '8px 0', fontSize: 12, color: 'var(--muted)', cursor: 'pointer' }} onClick={() => setPaidExpanded(true)}>
+              + {sections.paid.length - 3} mais pagas
+            </div>
+          )}
+        </div>
+      )}
 
       {modal && (
         <ExpenseModal
