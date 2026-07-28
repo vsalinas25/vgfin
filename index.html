@@ -2056,11 +2056,14 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
   // Compat: filtered for legacy code
   const filtered = useMemo(() => [...sections.overdue, ...sections.pending, ...sections.paid], [sections]);
 
-  const overdueCount = expenses.filter(e => isOverdue(e.due_date, e.status)).length;
-  const weekExp = filtered.reduce((a,b) => a + (parseFloat(b.amount)||0), 0);
-  const totalPendente = expenses.filter(e=>e.status==='pendente').reduce((a,b)=>a+(parseFloat(b.amount)||0),0);
-  const totalPagoMes = expenses.filter(e=>e.status==='pago'&&e.paid_date?.startsWith(monthISO(new Date()))).reduce((a,b)=>a+(parseFloat(b.amount)||0),0);
+  const overdueCount = sections.overdue.length;
   const [paidExpanded, setPaidExpanded] = useState(false);
+
+  // Summary cards — always reflect current view (mode + month/week + filters)
+  const summaryOverdue = sections.overdue.reduce((a,b) => a + (parseFloat(b.amount)||0), 0);
+  const summaryPending = [...sections.overdue, ...sections.pending].reduce((a,b) => a + (parseFloat(b.amount)||0), 0);
+  const summaryPaid = sections.paid.reduce((a,b) => a + (parseFloat(b.amount)||0), 0);
+  const summaryPaidLabel = viewMode === 'mes' ? getMonthLabel(selectedMonth) : getMonthLabel(monthISO(new Date()));
 
   async function handleSave(payload, nfItems) {
     const user = (await sb.auth.getUser()).data.user;
@@ -2196,7 +2199,7 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
   }
 
   const now = new Date();
-  const months12 = Array.from({length:12},(_,i) => {
+  const months13 = Array.from({length:14},(_,i) => {
     const d = new Date(now.getFullYear(), now.getMonth()-11+i, 1);
     return monthISO(d);
   });
@@ -2212,24 +2215,24 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
         </div>
       </div>
 
-      {/* Summary cards */}
+      {/* Summary cards — reflect current filter */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 16 }}>
         <div className="metric-card">
           <div className="metric-label">Vencidas</div>
-          <div className="metric-value" style={{ fontSize: 18, color: overdueCount > 0 ? 'var(--danger)' : 'var(--success)' }}>
-            {fmtBRL(sections.overdue.reduce((a,b)=>a+(parseFloat(b.amount)||0),0))}
+          <div className="metric-value" style={{ fontSize: 18, color: summaryOverdue > 0 ? 'var(--danger)' : 'var(--success)' }}>
+            {fmtBRL(summaryOverdue)}
           </div>
           <div className="metric-sub">{sections.overdue.length} conta{sections.overdue.length !== 1 ? 's' : ''}</div>
         </div>
         <div className="metric-card">
           <div className="metric-label">A Pagar</div>
-          <div className="metric-value" style={{ fontSize: 18 }}>{fmtBRL(totalPendente)}</div>
-          <div className="metric-sub">{expenses.filter(e=>e.status==='pendente').length} pendentes</div>
+          <div className="metric-value" style={{ fontSize: 18 }}>{fmtBRL(summaryPending)}</div>
+          <div className="metric-sub">{sections.pending.length} pendente{sections.pending.length !== 1 ? 's' : ''}</div>
         </div>
         <div className="metric-card">
-          <div className="metric-label">Pago ({getMonthLabel(monthISO(new Date()))})</div>
-          <div className="metric-value pos" style={{ fontSize: 18 }}>{fmtBRL(totalPagoMes)}</div>
-          <div className="metric-sub">{expenses.filter(e=>e.status==='pago'&&e.paid_date?.startsWith(monthISO(new Date()))).length} pagamentos</div>
+          <div className="metric-label">Pago ({summaryPaidLabel})</div>
+          <div className="metric-value pos" style={{ fontSize: 18 }}>{fmtBRL(summaryPaid)}</div>
+          <div className="metric-sub">{sections.paid.length} pagamento{sections.paid.length !== 1 ? 's' : ''}</div>
         </div>
       </div>
 
@@ -2260,7 +2263,7 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
           </div>
         ) : (
           <select className="form-control" style={{ width: 180 }} value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}>
-            {months12.map(m => <option key={m} value={m}>{getFullMonthLabel(m)}</option>)}
+            {months13.map(m => <option key={m} value={m}>{getFullMonthLabel(m)}</option>)}
           </select>
         )}
 
@@ -5803,8 +5806,8 @@ async function generateRecurringExpenses(sess) {
     const currentYear = now.getFullYear();
     let inserted = 0;
 
-    // Generate for current month AND next month
-    const monthsToGenerate = [now.getMonth(), now.getMonth() + 1];
+    // Generate for current month + next 2 months
+    const monthsToGenerate = [now.getMonth(), now.getMonth() + 1, now.getMonth() + 2];
 
     for (const exp of recurring) {
       const origDate = new Date(exp.due_date + 'T00:00:00');
@@ -6042,10 +6045,13 @@ function App() {
       // Auto-generate recurring expenses — reload if new ones were created
       generateRecurringExpenses(sess).then(hadNew => {
         if (hadNew) {
+          toast(`Despesas recorrentes geradas!`, 'success');
           sb.from('expenses').select('*').order('due_date').then(({ data }) => {
             if (data) setExpenses(data);
           });
         }
+      }).catch(e => {
+        console.error('generateRecurringExpenses failed:', e);
       });
 
       setLastSync(new Date());
