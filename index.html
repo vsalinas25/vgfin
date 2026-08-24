@@ -1087,7 +1087,7 @@ Regras: due_date = vencimento do boleto/duplicata (YYYY-MM-DD). amount = valor t
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
+      model: 'claude-sonnet-5',
       max_tokens: 4000,
       messages: [{ role: 'user', content: [documentBlock, { type: 'text', text: prompt }] }]
     })
@@ -3433,11 +3433,18 @@ Se não encontrar transações, retorne: []`
       const res = await fetch('https://dawn-cell-9729.vittoegiulio.workers.dev', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 4000, messages }),
+        body: JSON.stringify({ model: 'claude-sonnet-5', max_tokens: 4000, messages }),
       });
 
       const data = await res.json();
-      const text = data.content?.[0]?.text || '[]';
+      if (!res.ok || data.error) {
+        const apiMsg = data.error?.message || data.message || `HTTP ${res.status}`;
+        console.error('Fatura importer API error:', data);
+        toast('Erro na API: ' + apiMsg, 'error');
+        setStage('upload');
+        return;
+      }
+      const text = data.content?.find(b => b.type === 'text')?.text || '';
       const startIdx = text.indexOf('[');
       const endIdx = text.lastIndexOf(']');
       if (startIdx === -1 || endIdx === -1) {
@@ -3688,21 +3695,43 @@ Se não houver entradas: []`
       const res = await fetch('https://dawn-cell-9729.vittoegiulio.workers.dev', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2000, messages }),
+        body: JSON.stringify({ model: 'claude-sonnet-5', max_tokens: 8000, messages }),
       });
 
       const data = await res.json();
-      const text = data.content?.[0]?.text || '[]';
+
+      // Surface real API/worker errors instead of masking them as "no entries found"
+      if (!res.ok || data.error) {
+        const apiMsg = data.error?.message || data.message || `HTTP ${res.status}`;
+        console.error('ExtratoImporter API error:', data);
+        toast('Erro na API: ' + apiMsg, 'error');
+        setStage('upload');
+        return;
+      }
+      if (data.stop_reason === 'max_tokens') {
+        console.warn('ExtratoImporter: resposta truncada (max_tokens atingido)');
+      }
+
+      const text = data.content?.find(b => b.type === 'text')?.text || '';
       // Robust JSON extraction — find first [ and last ]
       const startIdx = text.indexOf('[');
       const endIdx = text.lastIndexOf(']');
       if (startIdx === -1 || endIdx === -1) {
+        console.warn('ExtratoImporter: resposta sem JSON reconhecível:', text.slice(0, 500));
         toast('Nenhuma entrada encontrada no extrato.', 'error');
         setStage('upload');
         return;
       }
       const jsonStr = text.slice(startIdx, endIdx + 1);
-      const parsed = JSON.parse(jsonStr);
+      let parsed;
+      try {
+        parsed = JSON.parse(jsonStr);
+      } catch (parseErr) {
+        console.error('ExtratoImporter: JSON malformado (possível truncamento):', jsonStr.slice(-300));
+        toast('Extrato muito grande ou JSON incompleto. Tente um período menor.', 'error');
+        setStage('upload');
+        return;
+      }
 
       if (!Array.isArray(parsed) || parsed.length === 0) {
         toast('Nenhuma entrada encontrada no extrato.', 'error');
@@ -4511,6 +4540,129 @@ function ComparativoMensal({ expenses, revenue }) {
 }
 
 /* ═══════════════════════════════════════════════════════
+   RESULTADO POR MÊS — Drilldown de qualquer mês do histórico
+═══════════════════════════════════════════════════════ */
+function ResultadoPorMes({ expenses, revenue }) {
+  // Build list of all months present in either revenue or expenses, newest first
+  const monthSet = new Set();
+  revenue.forEach(r => { const k = r.date ? r.date.slice(0,7) : r.month; if (k) monthSet.add(k); });
+  expenses.forEach(e => { const d = e.paid_date || e.due_date; if (d) monthSet.add(d.slice(0,7)); });
+  const months = [...monthSet].sort().reverse();
+
+  const [selMonth, setSelMonth] = useState(months[0] || monthISO(new Date()));
+
+  if (months.length === 0) {
+    return (
+      <div className="chart-card">
+        <div className="chart-title">Resultado por Mês</div>
+        <div className="empty-state"><div className="empty-msg">Sem dados de receita ou despesa ainda.</div></div>
+      </div>
+    );
+  }
+
+  const monthRevenue = revenue.filter(r => (r.date ? r.date.slice(0,7) : r.month) === selMonth);
+  const monthExpenses = expenses.filter(e => (e.paid_date || e.due_date).startsWith(selMonth));
+
+  const totalRev = monthRevenue.reduce((a,b) => a + (parseFloat(b.amount)||0), 0);
+  const totalExp = monthExpenses.reduce((a,b) => a + (parseFloat(b.amount)||0), 0);
+  const resultado = totalRev - totalExp;
+  const margem = totalRev > 0 ? (resultado/totalRev*100) : 0;
+
+  const revByTipo = {};
+  monthRevenue.forEach(r => { const t = r.tipo || 'operacional'; revByTipo[t] = (revByTipo[t]||0) + (parseFloat(r.amount)||0); });
+
+  const expByCat = {};
+  monthExpenses.forEach(e => { expByCat[e.category] = (expByCat[e.category]||0) + (parseFloat(e.amount)||0); });
+  const sortedCats = Object.entries(expByCat).sort((a,b) => b[1]-a[1]);
+
+  const topFornecedores = {};
+  monthExpenses.forEach(e => { topFornecedores[e.supplier_name] = (topFornecedores[e.supplier_name]||0) + (parseFloat(e.amount)||0); });
+  const sortedFornecedores = Object.entries(topFornecedores).sort((a,b) => b[1]-a[1]).slice(0,5);
+
+  return (
+    <div className="chart-card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <div>
+          <div className="chart-title">Resultado por Mês</div>
+          <div className="chart-sub">Detalhamento completo de um mês específico</div>
+        </div>
+        <select
+          value={selMonth}
+          onChange={e => setSelMonth(e.target.value)}
+          style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #e0dcd4', fontFamily: 'var(--font-mono)', fontSize: 12, background: '#fff' }}
+        >
+          {months.map(m => <option key={m} value={m}>{getMonthLabel(m)}</option>)}
+        </select>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, margin: '16px 0' }}>
+        <div className="metric-card" style={{ padding: '14px 16px' }}>
+          <div className="metric-label">Receita</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 700 }}>{fmtBRL(totalRev)}</div>
+        </div>
+        <div className="metric-card" style={{ padding: '14px 16px' }}>
+          <div className="metric-label">Despesas</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 700 }}>{fmtBRL(totalExp)}</div>
+        </div>
+        <div className="metric-card" style={{ padding: '14px 16px' }}>
+          <div className="metric-label">Resultado ({margem.toFixed(1)}%)</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 700, color: resultado >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+            {fmtBRL(resultado)}
+          </div>
+        </div>
+      </div>
+
+      {Object.keys(revByTipo).length > 1 && (
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 16 }}>
+          {Object.entries(revByTipo).map(([tipo, val]) => `${tipo === 'operacional' ? 'Operacional' : 'Não operacional'}: ${fmtBRL(val)}`).join('  ·  ')}
+        </div>
+      )}
+
+      {sortedCats.length > 0 && (
+        <>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>Despesas por Categoria</div>
+          <div style={{ marginBottom: 16 }}>
+            {sortedCats.map(([cat, val]) => {
+              const pct = totalExp > 0 ? (val/totalExp*100) : 0;
+              return (
+                <div key={cat} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                  <div style={{ width: 140, fontSize: 12, fontWeight: 500 }}>{cat}</div>
+                  <div style={{ flex: 1, height: 7, background: '#f0ece6', borderRadius: 2, overflow: 'hidden' }}>
+                    <div style={{ width: pct+'%', height: '100%', background: '#000' }} />
+                  </div>
+                  <div className="mono" style={{ fontSize: 12, width: 90, textAlign: 'right' }}>{fmtBRL(val)}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', width: 40, textAlign: 'right' }}>{pct.toFixed(1)}%</div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {sortedFornecedores.length > 0 && (
+        <>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>Top Fornecedores do Mês</div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <tbody>
+              {sortedFornecedores.map(([name, val]) => (
+                <tr key={name} style={{ borderBottom: '1px solid #f0ece6' }}>
+                  <td style={{ padding: '6px 10px', fontWeight: 500 }}>{name}</td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{fmtBRL(val)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      {monthExpenses.length === 0 && monthRevenue.length === 0 && (
+        <div style={{ fontSize: 12, color: 'var(--muted)' }}>Sem lançamentos neste mês.</div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
    INSUMOS — Gastos por Categoria de Item
 ═══════════════════════════════════════════════════════ */
 function InsumosCatChart({ expenseItems, expenses }) {
@@ -5001,6 +5153,7 @@ function Relatorios({ expenses, revenue, expenseItems }) {
       <DREMensal expenses={expenses} revenue={revenue} expenseItems={expenseItems} />
       <CMVChart expenses={expenses} revenue={revenue} expenseItems={expenseItems} />
       <ComparativoMensal expenses={expenses} revenue={revenue} />
+      <ResultadoPorMes expenses={expenses} revenue={revenue} />
 
       {/* ── ANÁLISE DE INSUMOS ─────────────────────────── */}
       <div style={{ marginTop: 8, marginBottom: 8 }}>
