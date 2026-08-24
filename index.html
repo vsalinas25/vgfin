@@ -3664,18 +3664,23 @@ function ExtratoImporter({ onImport, onClose }) {
           },
           {
             type: 'text',
-            text: `Você está analisando um extrato bancário do Itaú. Extraia TODAS as transações de ENTRADA (créditos) visíveis.
+            text: `Você está analisando um extrato bancário do Itaú Business. O formato tem colunas: Data | Descrição/Lançamento | Razão Social | CNPJ/CPF | Valor.
 
-Para cada entrada, retorne um objeto JSON com:
-- date: data no formato YYYY-MM-DD
-- description: descrição da transação (exatamente como aparece)
-- amount: valor numérico positivo (sem R$, sem pontos de milhar, use ponto decimal)
-- tipo: "operacional" se parecer venda/receita do negócio, "nao_operacional" caso contrário
+Extraia TODAS as linhas que representam ENTRADAS de dinheiro (créditos, recebimentos, PIX recebidos, TED recebidas, recebimentos de maquininha).
 
-Retorne APENAS um array JSON válido, sem texto adicional, sem markdown, sem explicações.
-Exemplo: [{"date":"2026-06-01","description":"PIX RECEBIDO FULANO","amount":1500.00,"tipo":"operacional"}]
+IGNORE: saídas, débitos, transferências enviadas, tarifas, IOF, pagamentos.
 
-Se não encontrar entradas, retorne: []`
+Para cada entrada encontrada, retorne:
+- date: data no formato YYYY-MM-DD (ano é 2026 se não especificado)
+- description: nome do lançamento + Razão Social combinados (ex: "ENTRADA PIX TRANSF - IFOODCOM AGENCIA DE RESTAURANTES")
+- amount: valor numérico positivo (remova R$, pontos de milhar, vírgula vira ponto decimal)
+- tipo: "operacional" para vendas/iFood/Rappi/maquininha/delivery. "nao_operacional" para outros
+
+ATENÇÃO: O extrato Itaú quebra linhas no meio — uma transação pode ocupar 2-3 linhas. Consolide em um único objeto.
+
+Retorne APENAS o array JSON, sem texto, sem markdown, sem explicações.
+Exemplo: [{"date":"2026-08-03","description":"ENTRADA PIX - IFOODCOM","amount":572.23,"tipo":"operacional"}]
+Se não houver entradas: []`
           }
         ]
       }];
