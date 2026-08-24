@@ -3438,8 +3438,14 @@ Se não encontrar transações, retorne: []`
 
       const data = await res.json();
       const text = data.content?.[0]?.text || '[]';
-      const clean = text.replace(/```json|```/g, '').trim();
-      const parsed = JSON.parse(clean);
+      const startIdx = text.indexOf('[');
+      const endIdx = text.lastIndexOf(']');
+      if (startIdx === -1 || endIdx === -1) {
+        toast('Nenhuma transação encontrada na fatura.', 'error');
+        setStage('upload');
+        return;
+      }
+      const parsed = JSON.parse(text.slice(startIdx, endIdx + 1));
 
       if (!Array.isArray(parsed) || parsed.length === 0) {
         toast('Nenhuma transação encontrada na fatura.', 'error');
@@ -3682,8 +3688,16 @@ Se não encontrar entradas, retorne: []`
 
       const data = await res.json();
       const text = data.content?.[0]?.text || '[]';
-      const clean = text.replace(/```json|```/g, '').trim();
-      const parsed = JSON.parse(clean);
+      // Robust JSON extraction — find first [ and last ]
+      const startIdx = text.indexOf('[');
+      const endIdx = text.lastIndexOf(']');
+      if (startIdx === -1 || endIdx === -1) {
+        toast('Nenhuma entrada encontrada no extrato.', 'error');
+        setStage('upload');
+        return;
+      }
+      const jsonStr = text.slice(startIdx, endIdx + 1);
+      const parsed = JSON.parse(jsonStr);
 
       if (!Array.isArray(parsed) || parsed.length === 0) {
         toast('Nenhuma entrada encontrada no extrato.', 'error');
