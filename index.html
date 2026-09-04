@@ -2139,7 +2139,23 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
   }
 
   async function handleDelete(id) {
+    const exp = expenses.find(e => e.id === id);
     setExpenses(prev => prev.filter(e => e.id !== id));
+
+    // If this is a generated instance of a recurring expense, record the
+    // exclusion FIRST so generateRecurringExpenses doesn't recreate it on next load.
+    if (exp && exp.recurring) {
+      const { error: exclError } = await sb.from('recurring_exclusions').insert({
+        supplier_name: exp.supplier_name,
+        due_date: exp.due_date,
+        amount: exp.amount,
+      });
+      if (exclError) {
+        console.error('Falha ao registrar exclusão de recorrente:', exclError);
+        toast('Aviso: pode voltar a aparecer (exclusão não registrada). ' + exclError.message, 'error');
+      }
+    }
+
     const { error } = await sb.from('expenses').delete().eq('id', id);
     if (error) {
       toast('Erro: ' + error.message, 'error');
@@ -2150,8 +2166,6 @@ function ContasPagar({ expenses, setExpenses, suppliers, revenue, onRefresh, isO
     setConfirm(null);
     onRefresh();
   }
-
-  // Row renderer — shared between sections
   function ExpenseRow({ e, dimmed }) {
     const ov = isOverdue(e.due_date, e.status);
     return (
@@ -5974,6 +5988,12 @@ async function generateRecurringExpenses(sess) {
 
     if (error || !recurring || recurring.length === 0) return false;
 
+    // Load exclusions — instances the user deliberately deleted, never recreate these
+    const { data: exclusions } = await sb.from('recurring_exclusions').select('supplier_name, due_date, amount');
+    const exclusionSet = new Set(
+      (exclusions || []).map(x => `${x.supplier_name}|${x.due_date}|${x.amount}`)
+    );
+
     const now = new Date();
     const currentYear = now.getFullYear();
     let inserted = 0;
@@ -6017,6 +6037,9 @@ async function generateRecurringExpenses(sess) {
       for (const targetDue of targetDates) {
         // Skip if same as or before the original
         if (targetDue <= exp.due_date) continue;
+
+        // Skip if the user deliberately deleted this exact instance before
+        if (exclusionSet.has(`${exp.supplier_name}|${targetDue}|${exp.amount}`)) continue;
 
         // Check duplicate
         const { data: existing } = await sb
