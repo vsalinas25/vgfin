@@ -6215,7 +6215,7 @@ function App() {
         .catch(e => console.warn('activity_log load failed:', e));
 
       // Auto-generate recurring expenses — reload if new ones were created
-      generateRecurringExpenses(sess).then(hadNew => {
+      generateRecurringExpenses(s).then(hadNew => {
         if (hadNew) {
           toast(`Despesas recorrentes geradas!`, 'success');
           sb.from('expenses').select('*').order('due_date').then(({ data }) => {
