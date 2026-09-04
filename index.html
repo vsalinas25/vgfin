@@ -3685,7 +3685,7 @@ Para cada entrada encontrada, retorne:
 
 ATENÇÃO: O extrato Itaú quebra linhas no meio — uma transação pode ocupar 2-3 linhas. Consolide em um único objeto.
 
-Retorne APENAS o array JSON, sem texto, sem markdown, sem explicações.
+Retorne APENAS o array JSON, sem texto, sem markdown, sem explicações, sem espaços desnecessários (JSON compacto, uma linha).
 Exemplo: [{"date":"2026-08-03","description":"ENTRADA PIX - IFOODCOM","amount":572.23,"tipo":"operacional"}]
 Se não houver entradas: []`
           }
@@ -3695,7 +3695,7 @@ Se não houver entradas: []`
       const res = await fetch('https://dawn-cell-9729.vittoegiulio.workers.dev', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-sonnet-5', max_tokens: 8000, messages }),
+        body: JSON.stringify({ model: 'claude-sonnet-5', max_tokens: 32000, messages }),
       });
 
       const data = await res.json();
